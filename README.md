@@ -30,7 +30,7 @@ npm install
 npm run dev      # tauri dev — launches the desktop app + tray
 ```
 
-A Nix devshell exposes the full workflow (`nix develop`, then `dev`, `check`, `test`, `fmt`, `build-app`, `build-pure`). See [AGENTS.md](AGENTS.md) for the architecture map and complete command reference.
+A Nix devshell exposes the full workflow (`nix develop`, then `dev`, `check`, `test`, `fmt`, `build-app`, `build-pure`, `package-dmg`). See [AGENTS.md](AGENTS.md) for the architecture map and complete command reference.
 
 ## Providers & configuration
 
@@ -43,6 +43,11 @@ claude auth login
 Burnrate refreshes in the background every five minutes and caches successful snapshots for five minutes to avoid tight polling.
 
 Only non-secret account configuration is stored on disk. On macOS the default path is `~/Library/Application Support/burnrate/accounts.json`; set `BURNRATE_CONFIG_DIR` to override. Manual secrets live in the OS keyring unless plaintext storage is explicitly selected for that account.
+
+## Troubleshooting (macOS)
+
+- **Keychain re-prompts on every launch.** macOS binds a keychain "Always Allow" grant to the requesting app's _code signature_. An unsigned binary (a bare `cargo build` / `cargo install` build, or an unsigned `.app`) presents a different identity each build, so the grant never sticks. Install a **code-signed** build and the grant persists: build one with `APPLE_SIGNING_IDENTITY="Developer ID Application: …" package-dmg` (run `security find-identity -v -p codesigning` to list identities). As an alternative, switch the account to **plaintext** secret storage in Preferences to skip the keychain entirely.
+- **Provider CLI "failed to start" in a `.app` install.** Apps launched from Finder/Launchpad inherit a minimal `PATH`. Burnrate searches the common install locations for `codex`/`claude`; if yours lives elsewhere, point at it with `BURNRATE_CODEX_BIN` / `BURNRATE_CLAUDE_BIN`.
 
 ## Releases
 

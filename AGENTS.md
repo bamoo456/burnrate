@@ -34,7 +34,11 @@ burnrate`).
   `BURNRATE_CONFIG_DIR`.
 - `key_store.rs` — secret storage: OS **keyring by default**, **plaintext only
   when explicitly selected**, with migration between modes and an in-process
-  read cache. Secrets never live in `accounts.json` under keyring mode.
+  read cache. Secrets never live in `accounts.json` under keyring mode. macOS
+  binds a keychain "Always Allow" grant to the app's code signature, so an
+  unsigned build re-prompts every launch; a code-signed install
+  (`APPLE_SIGNING_IDENTITY` → `package-dmg`, with `entitlements.macos.plist` for
+  the hardened runtime) makes the grant persist.
 - `models.rs` — every serde wire type shared with the UI. Structs are
   `camelCase`, enums `kebab-case`. This is the single source of truth that
   `src-ui/types.ts` mirrors by hand — keep them in sync.
@@ -44,7 +48,11 @@ burnrate`).
   usage-bucket and subscription parsing, status thresholds (Warning ≤20% /
   Exhausted ≤5% remaining), endpoint validation (HTTPS-only except localhost),
   and token resolution (keyring → credential file via provider-specific JSON
-  pointers). `detect_accounts()` aggregates per-provider detection.
+  pointers). `detect_accounts()` aggregates per-provider detection. `resolve_cli`
+  / `augmented_path` locate provider CLIs (`codex`, `claude`) across Homebrew,
+  Nix, Cargo, and JS-toolchain dirs, because a Finder-launched `.app` inherits
+  only a minimal `PATH`; overridable via `BURNRATE_CODEX_BIN`/`CODEX_BIN` and
+  `BURNRATE_CLAUDE_BIN`/`CLAUDE_BIN`.
 - `providers/{claude,codex,openrouter}.rs` — each implements `fetch()`, and
   claude/codex also implement `detect()`. claude reads `~/.claude` creds +
   macOS Keychain, validates with `claude auth status --json`, and queries the
@@ -56,6 +64,9 @@ burnrate`).
   the cursor-anchored `tray` popover window, `summarize()` reduces snapshots to
   a single status/label, and the macOS activation policy switch (Accessory =
   hidden from Dock, Regular = shown while Preferences is open).
+  `set_dock_icon_if_unbundled()` sets the Dock icon at runtime (via `objc2`
+  `NSApplication.setApplicationIconImage`) so the bare, non-bundled binary still
+  shows the Burnrate icon; the `.app` bundle's `icon.icns` is left untouched.
 
 ### Frontend (`src-ui/`, React 18 + Vite)
 
@@ -78,6 +89,12 @@ burnrate`).
   `ci.yml` and
   `release-plz.yml` enforce `git diff --exit-code -- dist`. After any frontend
   change: `npm run build` and commit the updated `dist/`.
+- **`custom-protocol` is a default Cargo feature.** Tauri only embeds `dist/`
+  (instead of loading the `devUrl` dev server) when `custom-protocol` is on. The
+  `tauri` CLI enables it for `tauri build`, but plain `cargo build --release` and
+  `cargo install burnrate` cannot — so it is on by default, and `tauri dev`
+  (`npm run dev`) opts out via `--no-default-features` to keep live reload.
+  Removing the default would make every non-`tauri build` binary open blank.
 - **CSP allowlist.** `tauri.conf.json` restricts `connect-src` to the Anthropic,
   ChatGPT, OpenRouter, and localhost hosts — adding a provider endpoint requires
   editing that CSP.
@@ -89,7 +106,7 @@ burnrate`).
 
 Run inside `nix develop` (or `direnv` auto-activates it); the devshell exposes
 short aliases (`dev`, `check`, `test`, `fmt`, `build-app`, `build-pure`,
-`package-crate`, `clean`).
+`package-dmg`, `package-crate`, `clean`).
 
 ```sh
 npm install            # one-time: install JS deps
@@ -108,7 +125,8 @@ npx vitest run -t "summary promotes"     # single UI test by name
 npm run coverage       # UI + Rust coverage; both gated at 80%
                        # (Rust gate ignores main.rs/app_state.rs/tray.rs — Tauri glue)
 
-./scripts/build-app    # npm run build + cargo build --release
+./scripts/build-app    # npm run build + cargo build --release (embeds dist/ via default custom-protocol)
+./scripts/package-dmg  # macOS .dmg + .app bundle via `tauri build` (real Dock icon; macOS only)
 nix build .#burnrate   # pure Nix package build
 cargo package --allow-dirty   # verify the crates.io archive (incl. bundled dist/)
 nix flake check        # when Nix/devshell wiring changes
