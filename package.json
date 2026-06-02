@@ -1,0 +1,38 @@
+{
+  "name": "burnrate",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:web": "vite",
+    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "coverage": "npm run coverage:ui && npm run coverage:rust",
+    "coverage:ui": "vitest run --coverage",
+    "coverage:rust": "cargo llvm-cov --workspace --lcov --output-path coverage/rust-lcov.info --fail-under-lines 80 --ignore-filename-regex 'src/(main|app_state|tray|key_store)[.]rs'",
+    "fmt": "prettier --write ."
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.0.0",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.2",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^15.0.7",
+    "@testing-library/user-event": "^14.5.2",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^6.0.2",
+    "@vitest/coverage-v8": "^4.1.8",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3",
+    "vite": "^8.0.16",
+    "vitest": "^4.1.8"
+  }
+}
