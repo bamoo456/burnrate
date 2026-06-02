@@ -2,11 +2,11 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use reqwest::Client;
 
-use crate::models::{
-    AccountConfig, BurnRateSnapshot, QuotaSnapshot, SnapshotStatus, UsageSnapshot,
-};
+use crate::models::{AccountConfig, QuotaSnapshot, UsageSnapshot};
 
-use super::{bucket_from_parts, endpoint, number, primary_quota, require_token};
+use super::{
+    bucket_from_parts, endpoint, number, primary_quota, require_token, status_from_remaining,
+};
 
 const DEFAULT_ENDPOINT: &str = "https://openrouter.ai/api/v1/credits";
 
@@ -52,15 +52,7 @@ pub(crate) fn parse_openrouter(
         )
     });
 
-    let status = match (total, remaining) {
-        (Some(total), Some(remaining)) if total > 0.0 && remaining / total <= 0.05 => {
-            SnapshotStatus::Exhausted
-        }
-        (Some(total), Some(remaining)) if total > 0.0 && remaining / total <= 0.2 => {
-            SnapshotStatus::Warning
-        }
-        _ => SnapshotStatus::Healthy,
-    };
+    let status = status_from_remaining(total, remaining);
 
     let bucket = bucket_from_parts(
         "credits",
@@ -70,7 +62,7 @@ pub(crate) fn parse_openrouter(
             used,
             limit: total,
             remaining,
-            unit: "credits".to_string(),
+            unit: "USD".to_string(),
             reset_at: None,
         },
     );
@@ -84,10 +76,6 @@ pub(crate) fn parse_openrouter(
         subscription: None,
         usage_buckets: vec![bucket],
         quota,
-        burn_rate: Some(BurnRateSnapshot {
-            per_hour: used / 24.0,
-            projected_depletion_at: None,
-        }),
         message: None,
         fetched_at: Utc::now(),
     }
@@ -103,7 +91,7 @@ mod tests {
     };
 
     use super::*;
-    use crate::models::{ProviderKind, SecretStorageMode};
+    use crate::models::{ProviderKind, SecretStorageMode, SnapshotStatus};
 
     fn account() -> AccountConfig {
         AccountConfig {
@@ -135,7 +123,9 @@ mod tests {
         );
 
         assert_eq!(snapshot.status, SnapshotStatus::Warning);
-        assert_eq!(snapshot.quota.unwrap().remaining, Some(15.0));
+        let quota = snapshot.quota.unwrap();
+        assert_eq!(quota.remaining, Some(15.0));
+        assert_eq!(quota.unit, "USD");
     }
 
     #[tokio::test]
@@ -158,6 +148,8 @@ mod tests {
         let snapshot = fetch(&Client::new(), &account).await.unwrap();
 
         assert_eq!(snapshot.status, SnapshotStatus::Healthy);
-        assert_eq!(snapshot.quota.unwrap().remaining, Some(21.0));
+        let quota = snapshot.quota.unwrap();
+        assert_eq!(quota.remaining, Some(21.0));
+        assert_eq!(quota.unit, "USD");
     }
 }

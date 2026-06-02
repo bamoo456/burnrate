@@ -7,16 +7,22 @@ import {
   useState,
 } from "react";
 import {
+  closePreferences,
   detectAccounts,
   loadDashboard,
+  onDashboardUpdated,
   onRefreshRequested,
-  refreshSnapshots,
+  onSettingsUpdated,
+  refreshDashboard,
   removeAccount,
   resizePreferencesToContent,
   saveAccount,
-  saveSettings,
 } from "./api";
-import { emptyForm, Preferences } from "./Preferences";
+import {
+  OPENROUTER_DEFAULT_ENDPOINT,
+  emptyForm,
+  Preferences,
+} from "./Preferences";
 import { TrayPanel } from "./TrayPanel";
 import type {
   AccountInput,
@@ -55,7 +61,9 @@ export function App() {
     setBusy(true);
     setError(null);
     try {
-      setSnapshots(await refreshSnapshots());
+      const dashboard = await refreshDashboard();
+      setState(dashboard);
+      setSnapshots(dashboard.snapshots);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -68,16 +76,87 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (isTrayView) {
+      return;
+    }
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (!event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key !== "w" && key !== "q") {
+        return;
+      }
+      event.preventDefault();
+      void closePreferences();
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [isTrayView]);
+
+  useEffect(() => {
     let cleanup: (() => void) | undefined;
+    let disposed = false;
     void onRefreshRequested(refreshOnly).then((unlisten) => {
-      cleanup = unlisten;
+      if (disposed) {
+        unlisten();
+      } else {
+        cleanup = unlisten;
+      }
     });
-    return () => cleanup?.();
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
   }, []);
 
   const accounts = state?.accounts ?? [];
-  const summary = useMemo(() => summarize(snapshots), [snapshots]);
+  const summary = useMemo(
+    () => summaryFromBackend(state?.traySummary, snapshots),
+    [state?.traySummary, snapshots],
+  );
   const settings = state?.settings ?? { hideFromDock: true };
+
+  useEffect(() => {
+    let cleanupDashboard: (() => void) | undefined;
+    let cleanupSettings: (() => void) | undefined;
+    let disposed = false;
+    void onDashboardUpdated((dashboard) => {
+      setState(dashboard);
+      setSnapshots(dashboard.snapshots);
+    }).then((unlisten) => {
+      if (disposed) {
+        unlisten();
+      } else {
+        cleanupDashboard = unlisten;
+      }
+    });
+    void onSettingsUpdated((settings) => {
+      setState((previous) =>
+        previous
+          ? { ...previous, settings }
+          : {
+              accounts: [],
+              snapshots: [],
+              traySummary: summaryFromBackend(undefined, []),
+              settings,
+            },
+      );
+    }).then((unlisten) => {
+      if (disposed) {
+        unlisten();
+      } else {
+        cleanupSettings = unlisten;
+      }
+    });
+    return () => {
+      disposed = true;
+      cleanupDashboard?.();
+      cleanupSettings?.();
+    };
+  }, []);
 
   useLayoutEffect(() => {
     if (isTrayView) {
@@ -90,9 +169,49 @@ export function App() {
 
     let frame = 0;
     const measure = () => {
-      const rect = element.getBoundingClientRect();
-      const width = Math.ceil(Math.max(element.scrollWidth, rect.width));
-      const height = Math.ceil(Math.max(element.scrollHeight, rect.height));
+      const px = (value: string) => Number.parseFloat(value) || 0;
+      const style = window.getComputedStyle(element);
+      const paddingX = px(style.paddingLeft) + px(style.paddingRight);
+      const paddingY = px(style.paddingTop) + px(style.paddingBottom);
+      const header = element.querySelector<HTMLElement>(".prefs-header");
+      const notice = element.querySelector<HTMLElement>(".notice");
+      const layout = element.querySelector<HTMLElement>(".prefs-layout");
+      const sidebar = element.querySelector<HTMLElement>(".prefs-list");
+      const main = element.querySelector<HTMLElement>(".prefs-main");
+      const layoutStyle = layout ? window.getComputedStyle(layout) : null;
+      const rowGap = layoutStyle
+        ? px(layoutStyle.rowGap || layoutStyle.gap)
+        : 0;
+      const columnGap = layoutStyle
+        ? px(layoutStyle.columnGap || layoutStyle.gap)
+        : 0;
+      const headerStyle = header ? window.getComputedStyle(header) : null;
+      const headerMargin = headerStyle ? px(headerStyle.marginBottom) : 0;
+      const noticeStyle = notice ? window.getComputedStyle(notice) : null;
+      const noticeMargin = noticeStyle ? px(noticeStyle.marginBottom) : 0;
+      const hasSingleColumn =
+        layout !== null &&
+        window.getComputedStyle(layout).gridTemplateColumns.split(" ").length <=
+          1;
+      const sidebarWidth = sidebar?.scrollWidth ?? 0;
+      const mainWidth = main?.scrollWidth ?? 0;
+      const layoutWidth = hasSingleColumn
+        ? Math.max(sidebarWidth, mainWidth)
+        : sidebarWidth + columnGap + mainWidth;
+      const layoutHeight = hasSingleColumn
+        ? (sidebar?.scrollHeight ?? 0) + rowGap + (main?.scrollHeight ?? 0)
+        : Math.max(sidebar?.scrollHeight ?? 0, main?.scrollHeight ?? 0);
+      const width = Math.ceil(
+        Math.max(element.scrollWidth, layoutWidth + paddingX),
+      );
+      const height = Math.ceil(
+        paddingY +
+          (header?.offsetHeight ?? 0) +
+          headerMargin +
+          (notice?.offsetHeight ?? 0) +
+          noticeMargin +
+          layoutHeight,
+      );
       const last = lastPreferenceSize.current;
       if (
         Math.abs(width - last.width) <= 1 &&
@@ -109,23 +228,14 @@ export function App() {
     };
 
     scheduleMeasure();
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(scheduleMeasure);
-    observer?.observe(element);
-    window.addEventListener("resize", scheduleMeasure);
 
     return () => {
       cancelAnimationFrame(frame);
-      observer?.disconnect();
-      window.removeEventListener("resize", scheduleMeasure);
     };
   }, [
     isTrayView,
     accounts.length,
     snapshots,
-    settings.hideFromDock,
     summary.label,
     busy,
     error,
@@ -136,17 +246,25 @@ export function App() {
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
+    const endpoint = form.endpointOverride?.trim() || null;
+    const endpointOverride =
+      form.provider === "openrouter" && endpoint === OPENROUTER_DEFAULT_ENDPOINT
+        ? null
+        : endpoint;
     setBusy(true);
     setError(null);
     try {
       const accounts = await saveAccount({
         ...form,
-        endpointOverride: form.endpointOverride?.trim() || null,
+        endpointOverride,
         secret: form.secret?.trim() || null,
       });
       updateAccounts(accounts, settings, summary);
       setForm(emptyForm);
       setActiveId(null);
+      const dashboard = await refreshDashboard();
+      setState(dashboard);
+      setSnapshots(dashboard.snapshots);
     } catch (err) {
       setError(String(err));
     } finally {
@@ -161,7 +279,9 @@ export function App() {
       provider: account.provider,
       label: account.label,
       enabled: account.enabled,
-      endpointOverride: account.endpointOverride ?? "",
+      endpointOverride:
+        account.endpointOverride ??
+        (account.provider === "openrouter" ? OPENROUTER_DEFAULT_ENDPOINT : ""),
       secretStorage: account.secretStorage,
       secret: "",
     });
@@ -191,32 +311,10 @@ export function App() {
     }
   }
 
-  async function onSettingsChange(settings: AppSettings) {
-    setBusy(true);
-    setError(null);
-    try {
-      const nextSettings = await saveSettings(settings);
-      setState((previous) =>
-        previous
-          ? { ...previous, settings: nextSettings }
-          : {
-              accounts: [],
-              snapshots,
-              traySummary: summary,
-              settings: nextSettings,
-            },
-      );
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   function updateAccounts(
     accounts: AccountView[],
     settings: AppSettings,
-    summary: ReturnType<typeof summarize>,
+    summary: ReturnType<typeof summaryFromBackend>,
   ) {
     setState((previous) =>
       previous
@@ -241,7 +339,6 @@ export function App() {
     <Preferences
       accounts={accounts}
       snapshots={snapshots}
-      settings={settings}
       summary={summary}
       busy={busy}
       error={error}
@@ -252,41 +349,75 @@ export function App() {
       onSubmit={(event) => void onSubmit(event)}
       onDetect={() => void onDetect()}
       onRefresh={() => void refreshOnly()}
-      onSettingsChange={(settings) => void onSettingsChange(settings)}
       onEditAccount={editAccount}
       onRemoveAccount={(id) => void onRemove(id)}
     />
   );
 }
 
-function summarize(snapshots: UsageSnapshot[]) {
+function summaryFromBackend(
+  traySummary: DashboardState["traySummary"] | null | undefined,
+  snapshots: UsageSnapshot[],
+) {
+  if (traySummary) {
+    return {
+      ...traySummary,
+      shortLabel: shortSummaryLabel(traySummary.status),
+    };
+  }
+
   const criticalCount = snapshots.filter((snapshot) =>
     ["exhausted", "error"].includes(snapshot.status),
   ).length;
   const warningCount = snapshots.filter(
     (snapshot) => snapshot.status === "warning",
   ).length;
-  const label =
+  const staleCount = snapshots.filter(
+    (snapshot) => snapshot.status === "stale",
+  ).length;
+  const status =
     criticalCount > 0
-      ? `Burnrate: ${criticalCount} critical`
+      ? "exhausted"
       : warningCount > 0
+        ? "warning"
+        : staleCount > 0
+          ? "stale"
+          : snapshots.length > 0
+            ? "healthy"
+            : "not-configured";
+  const label =
+    status === "exhausted"
+      ? `Burnrate: ${criticalCount} critical`
+      : status === "warning"
         ? `Burnrate: ${warningCount} warning`
-        : snapshots.length > 0
-          ? "Burnrate: all quotas healthy"
-          : "Burnrate: no enabled accounts";
+        : status === "stale"
+          ? "Burnrate: data is stale"
+          : status === "healthy"
+            ? "Burnrate: all quotas healthy"
+            : "Burnrate: no enabled accounts";
 
   return {
     label,
-    shortLabel:
-      criticalCount > 0 ? "Critical" : warningCount > 0 ? "Warning" : "Healthy",
-    status:
-      criticalCount > 0
-        ? "exhausted"
-        : warningCount > 0
-          ? "warning"
-          : "healthy",
+    shortLabel: shortSummaryLabel(status),
+    status,
     criticalCount,
     warningCount,
     updatedAt: new Date().toISOString(),
   } as const;
+}
+
+function shortSummaryLabel(status: DashboardState["traySummary"]["status"]) {
+  switch (status) {
+    case "exhausted":
+    case "error":
+      return "Critical";
+    case "warning":
+      return "Warning";
+    case "stale":
+      return "Stale";
+    case "not-configured":
+      return "Idle";
+    case "healthy":
+      return "Healthy";
+  }
 }

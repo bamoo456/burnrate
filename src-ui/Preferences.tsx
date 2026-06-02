@@ -15,10 +15,10 @@ import {
   formatReset,
   primaryBucket,
 } from "./format";
+import { ProviderLogo } from "./ProviderLogo";
 import type {
   AccountInput,
   AccountView,
-  AppSettings,
   ProviderKind,
   SecretStorageMode,
   SnapshotStatus,
@@ -26,10 +26,17 @@ import type {
   UsageSnapshot,
 } from "./types";
 
+export const OPENROUTER_DEFAULT_ENDPOINT =
+  "https://openrouter.ai/api/v1/credits";
+
 export const providerLabels: Record<ProviderKind, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   openrouter: "OpenRouter",
+};
+
+const providerDefaultEndpoints: Partial<Record<ProviderKind, string>> = {
+  openrouter: OPENROUTER_DEFAULT_ENDPOINT,
 };
 
 const statusLabels: Record<SnapshotStatus, string> = {
@@ -45,7 +52,7 @@ export const emptyForm: AccountInput = {
   provider: "openrouter",
   label: "OpenRouter",
   enabled: true,
-  endpointOverride: "",
+  endpointOverride: OPENROUTER_DEFAULT_ENDPOINT,
   secretStorage: "keyring",
   secret: "",
 };
@@ -62,7 +69,6 @@ type Summary = {
 export function Preferences({
   accounts,
   snapshots,
-  settings,
   summary,
   busy,
   error,
@@ -73,13 +79,11 @@ export function Preferences({
   onSubmit,
   onDetect,
   onRefresh,
-  onSettingsChange,
   onEditAccount,
   onRemoveAccount,
 }: {
   accounts: AccountView[];
   snapshots: UsageSnapshot[];
-  settings: AppSettings;
   summary: Summary;
   busy: boolean;
   error: string | null;
@@ -90,7 +94,6 @@ export function Preferences({
   onSubmit: (event: FormEvent) => void;
   onDetect: () => void;
   onRefresh: () => void;
-  onSettingsChange: (settings: AppSettings) => void;
   onEditAccount: (account: AccountView) => void;
   onRemoveAccount: (id: string) => void;
 }) {
@@ -102,20 +105,6 @@ export function Preferences({
           <p>{summary.label}</p>
         </div>
         <div className="toolbar">
-          <label
-            className="dock-toggle"
-            title="Hide Burnrate from the macOS Dock"
-          >
-            <input
-              type="checkbox"
-              checked={settings.hideFromDock}
-              disabled={busy}
-              onChange={(event) =>
-                onSettingsChange({ hideFromDock: event.target.checked })
-              }
-            />
-            Hide Dock Icon
-          </label>
           <button
             className="icon-button"
             onClick={onDetect}
@@ -205,6 +194,10 @@ export function Preferences({
                       ...current,
                       provider: event.target.value as ProviderKind,
                       label: providerLabels[event.target.value as ProviderKind],
+                      endpointOverride:
+                        providerDefaultEndpoints[
+                          event.target.value as ProviderKind
+                        ] ?? "",
                     }))
                   }
                 >
@@ -327,11 +320,14 @@ function AccountButton({
   return (
     <div className={`account-row ${active ? "active" : ""}`}>
       <button className="account-main" onClick={() => onEdit(account)}>
-        <strong>{account.label}</strong>
-        <small>
-          {providerLabels[account.provider]}
-          {account.autoDetected ? " · Auto" : ""}
-        </small>
+        <ProviderLogo provider={account.provider} size="sm" />
+        <span>
+          <strong>{account.label}</strong>
+          <small>
+            {providerLabels[account.provider]}
+            {account.autoDetected ? " · Auto" : ""}
+          </small>
+        </span>
       </button>
       <span className="account-flags">
         {account.hasSecret ? <KeyRound size={15} /> : null}
@@ -359,11 +355,14 @@ function UsageRow({ snapshot }: { snapshot: UsageSnapshot }) {
   return (
     <article className={`usage-row ${snapshot.status}`}>
       <div className="usage-head">
-        <div>
-          <strong>{snapshot.label}</strong>
-          <small>
-            {providerLabels[snapshot.provider]} · {plan}
-          </small>
+        <div className="usage-provider">
+          <ProviderLogo provider={snapshot.provider} size="sm" />
+          <span>
+            <strong>{snapshot.label}</strong>
+            <small>
+              {providerLabels[snapshot.provider]} · {plan}
+            </small>
+          </span>
         </div>
         <StatusBadge status={snapshot.status} />
       </div>

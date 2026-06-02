@@ -1,13 +1,24 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
+import {
+  bucketFromQuota,
+  bucketPercent,
+  formatLimit,
+  formatNumber,
+  formatReset,
+} from "./format";
+import { TrayPanel } from "./TrayPanel";
 import type { AccountView, DashboardState, UsageSnapshot } from "./types";
 
 const api = vi.hoisted(() => ({
+  closePreferences: vi.fn(),
   detectAccounts: vi.fn(),
   loadDashboard: vi.fn(),
+  onDashboardUpdated: vi.fn(),
   onRefreshRequested: vi.fn(),
-  refreshSnapshots: vi.fn(),
+  onSettingsUpdated: vi.fn(),
+  refreshDashboard: vi.fn(),
   removeAccount: vi.fn(),
   resizePreferencesToContent: vi.fn(),
   saveAccount: vi.fn(),
@@ -18,8 +29,11 @@ vi.mock("./api", () => api);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  api.onDashboardUpdated.mockResolvedValue(() => {});
   api.onRefreshRequested.mockResolvedValue(() => {});
-  api.refreshSnapshots.mockResolvedValue([]);
+  api.onSettingsUpdated.mockResolvedValue(() => {});
+  api.refreshDashboard.mockResolvedValue(dashboardState());
+  api.closePreferences.mockResolvedValue(undefined);
   api.resizePreferencesToContent.mockResolvedValue(undefined);
   api.detectAccounts.mockResolvedValue([]);
   api.removeAccount.mockResolvedValue([]);
@@ -93,7 +107,6 @@ test("renders stale snapshot state", async () => {
             unit: "requests",
             resetAt: null,
           },
-          burnRate: { perHour: 3.75, projectedDepletionAt: null },
           message: "Last refresh is older than the quota window.",
           fetchedAt: new Date().toISOString(),
         },
@@ -103,10 +116,54 @@ test("renders stale snapshot state", async () => {
 
   render(<App />);
 
-  expect(await screen.findByText("Stale")).toBeInTheDocument();
+  expect((await screen.findAllByText("Stale")).length).toBeGreaterThan(1);
+  expect(screen.getByText("Burnrate: data is stale")).toBeInTheDocument();
   expect(
     screen.getByText("Last refresh is older than the quota window."),
   ).toBeInTheDocument();
+});
+
+test("applies dashboard updates emitted by the backend", async () => {
+  let onDashboard: (dashboard: DashboardState) => void = () => {};
+  api.loadDashboard.mockResolvedValue(dashboardState());
+  api.onDashboardUpdated.mockImplementation((handler) => {
+    onDashboard = handler;
+    return Promise.resolve(() => {});
+  });
+
+  render(<App />);
+
+  expect(
+    await screen.findByText("Burnrate: no enabled accounts"),
+  ).toBeInTheDocument();
+
+  onDashboard(
+    dashboardState({
+      snapshots: [
+        {
+          accountId: "codex-local",
+          provider: "codex",
+          label: "Codex",
+          status: "warning",
+          subscription: null,
+          usageBuckets: [],
+          quota: null,
+          message: null,
+          fetchedAt: new Date().toISOString(),
+        },
+      ],
+      traySummary: {
+        label: "Burnrate: 1 warning",
+        status: "warning",
+        criticalCount: 0,
+        warningCount: 1,
+        updatedAt: new Date().toISOString(),
+      },
+    }),
+  );
+
+  expect(await screen.findByText("Burnrate: 1 warning")).toBeInTheDocument();
+  expect(api.onDashboardUpdated).toHaveBeenCalledOnce();
 });
 
 test("renders compact tray view from the tray window route", async () => {
@@ -161,7 +218,6 @@ test("renders compact tray view from the tray window route", async () => {
             unit: "requests",
             resetAt: null,
           },
-          burnRate: { perHour: 3.75, projectedDepletionAt: null },
           message: null,
           fetchedAt: new Date().toISOString(),
         },
@@ -178,25 +234,352 @@ test("renders compact tray view from the tray window route", async () => {
   expect(screen.getByText("10 / 100 requests")).toBeInTheDocument();
 });
 
+test("falls back to frontend summaries for older dashboard payloads", async () => {
+  api.loadDashboard.mockResolvedValue(
+    dashboardState({
+      snapshots: [snapshot("healthy"), snapshot("error")],
+      traySummary: undefined as unknown as DashboardState["traySummary"],
+    }),
+  );
+
+  render(<App />);
+
+  expect(await screen.findByText("Burnrate: 1 critical")).toBeInTheDocument();
+});
+
+test("closes preferences from macOS window shortcuts", async () => {
+  api.loadDashboard.mockResolvedValue(dashboardState());
+
+  render(<App />);
+
+  await screen.findByRole("heading", { name: "Preferences" });
+  fireEvent.keyDown(window, { key: "w", metaKey: true });
+  fireEvent.keyDown(window, { key: "q", metaKey: true });
+
+  expect(api.closePreferences).toHaveBeenCalledTimes(2);
+});
+
+test("refreshes usage after saving an OpenRouter account", async () => {
+  const savedAccount: AccountView = {
+    id: "openrouter-team",
+    provider: "openrouter",
+    label: "OpenRouter Team",
+    enabled: true,
+    autoDetected: false,
+    credentialPath: null,
+    endpointOverride: null,
+    secretStorage: "keyring",
+    hasSecret: true,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  api.loadDashboard.mockResolvedValue(dashboardState());
+  api.saveAccount.mockResolvedValue([savedAccount]);
+  api.refreshDashboard.mockResolvedValue(
+    dashboardState({
+      accounts: [savedAccount],
+      snapshots: [snapshot("healthy", { accountId: "openrouter-team" })],
+    }),
+  );
+
+  render(<App />);
+
+  await screen.findByRole("heading", { name: "Preferences" });
+  fireEvent.change(screen.getByLabelText("Label"), {
+    target: { value: "OpenRouter Team" },
+  });
+  fireEvent.change(screen.getByLabelText("API Key"), {
+    target: { value: "sk-openrouter" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+  expect(
+    await screen.findByText("Burnrate: all quotas healthy"),
+  ).toBeInTheDocument();
+  expect(api.saveAccount).toHaveBeenCalledWith(
+    expect.objectContaining({
+      endpointOverride: null,
+      label: "OpenRouter Team",
+      provider: "openrouter",
+      secret: "sk-openrouter",
+    }),
+  );
+  expect(api.refreshDashboard).toHaveBeenCalledOnce();
+});
+
+test("falls back to frontend warning and stale summaries", async () => {
+  api.loadDashboard.mockResolvedValue(
+    dashboardState({
+      snapshots: [snapshot("warning")],
+      traySummary: undefined as unknown as DashboardState["traySummary"],
+    }),
+  );
+
+  render(<App />);
+
+  expect(await screen.findByText("Burnrate: 1 warning")).toBeInTheDocument();
+
+  cleanup();
+  api.loadDashboard.mockResolvedValue(
+    dashboardState({
+      snapshots: [snapshot("stale")],
+      traySummary: undefined as unknown as DashboardState["traySummary"],
+    }),
+  );
+  render(<App />);
+
+  expect(
+    await screen.findByText("Burnrate: data is stale"),
+  ).toBeInTheDocument();
+});
+
+test("renders fallback healthy and empty summaries", async () => {
+  api.loadDashboard.mockResolvedValue(
+    dashboardState({
+      snapshots: [snapshot("healthy")],
+      traySummary: undefined as unknown as DashboardState["traySummary"],
+    }),
+  );
+
+  render(<App />);
+
+  expect(
+    await screen.findByText("Burnrate: all quotas healthy"),
+  ).toBeInTheDocument();
+
+  cleanup();
+  api.loadDashboard.mockResolvedValue(
+    dashboardState({
+      snapshots: [],
+      traySummary: undefined as unknown as DashboardState["traySummary"],
+    }),
+  );
+  render(<App />);
+
+  expect(
+    await screen.findByText("Burnrate: no enabled accounts"),
+  ).toBeInTheDocument();
+});
+
+test("renders tray summary branches and account disabled state", () => {
+  const { rerender } = render(
+    <TrayPanel
+      state={dashboardState({
+        accounts: [
+          {
+            id: "disabled-openrouter",
+            provider: "openrouter",
+            label: "OpenRouter",
+            enabled: false,
+            autoDetected: false,
+            credentialPath: null,
+            endpointOverride: null,
+            secretStorage: "plaintext",
+            hasSecret: true,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          },
+        ],
+      })}
+      snapshots={[]}
+      busy={false}
+      error="network offline"
+      onRefresh={() => {}}
+    />,
+  );
+
+  expect(screen.getByText("No enabled accounts")).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent("network offline");
+  expect(screen.getByText("Disabled")).toBeInTheDocument();
+
+  rerender(
+    <TrayPanel
+      state={dashboardState()}
+      snapshots={[snapshot("error")]}
+      busy={false}
+      error={null}
+      onRefresh={() => {}}
+    />,
+  );
+  expect(screen.getByText("Critical usage")).toBeInTheDocument();
+
+  rerender(
+    <TrayPanel
+      state={dashboardState()}
+      snapshots={[snapshot("stale")]}
+      busy={false}
+      error={null}
+      onRefresh={() => {}}
+    />,
+  );
+  expect(screen.getByText("Usage data is stale")).toBeInTheDocument();
+
+  rerender(
+    <TrayPanel
+      state={dashboardState()}
+      snapshots={[snapshot("healthy")]}
+      busy
+      error={null}
+      onRefresh={() => {}}
+    />,
+  );
+  expect(screen.getByText("All quotas healthy")).toBeInTheDocument();
+  expect(screen.getByTitle("Refresh")).toBeDisabled();
+});
+
+test("dispatches tray refresh requests", async () => {
+  window.history.replaceState({}, "", "/?view=tray");
+  api.loadDashboard.mockResolvedValue(dashboardState());
+  api.refreshDashboard.mockResolvedValue(
+    dashboardState({
+      snapshots: [snapshot("healthy")],
+    }),
+  );
+
+  render(<App />);
+
+  fireEvent.click(await screen.findByTitle("Refresh"));
+
+  expect(await screen.findByText("All quotas healthy")).toBeInTheDocument();
+  expect(api.refreshDashboard).toHaveBeenCalledOnce();
+});
+
+test("formats quota fallback and reset edge cases", () => {
+  expect(bucketFromQuota(snapshot("healthy", { quota: null }))).toBeNull();
+  expect(
+    formatLimit({
+      id: "unknown",
+      label: "Unknown",
+      window: null,
+      used: 0,
+      limit: null,
+      remaining: null,
+      unit: "%",
+      resetAt: null,
+      status: "healthy",
+    }),
+  ).toBe("Unknown");
+  expect(
+    formatLimit({
+      id: "credits",
+      label: "Credits",
+      window: null,
+      used: 66.4,
+      limit: 125,
+      remaining: 58.6,
+      unit: "USD",
+      resetAt: null,
+      status: "healthy",
+    }),
+  ).toBe("$58.6 / $125");
+  expect(
+    bucketPercent({
+      id: "over",
+      label: "Over",
+      window: null,
+      used: 0,
+      limit: 100,
+      remaining: 125,
+      unit: "%",
+      resetAt: null,
+      status: "healthy",
+    }),
+  ).toBe(100);
+  expect(formatNumber(101.25)).toBe("101");
+  expect(formatReset(null)).toBe("");
+  expect(formatReset("not a date")).toBe("");
+  expect(
+    formatReset(new Date(Date.now() + 49 * 60 * 60 * 1000).toISOString()),
+  ).toMatch(/^resets /);
+});
+
 function dashboardState(
   overrides: Partial<DashboardState> = {},
 ): DashboardState {
   const accounts: AccountView[] = overrides.accounts ?? [];
   const snapshots: UsageSnapshot[] = overrides.snapshots ?? [];
+  const criticalCount = snapshots.filter((snapshot) =>
+    ["exhausted", "error"].includes(snapshot.status),
+  ).length;
+  const warningCount = snapshots.filter(
+    (snapshot) => snapshot.status === "warning",
+  ).length;
+  const staleCount = snapshots.filter(
+    (snapshot) => snapshot.status === "stale",
+  ).length;
+  const status =
+    criticalCount > 0
+      ? "exhausted"
+      : warningCount > 0
+        ? "warning"
+        : staleCount > 0
+          ? "stale"
+          : snapshots.length > 0
+            ? "healthy"
+            : "not-configured";
+  const label =
+    status === "exhausted"
+      ? `Burnrate: ${criticalCount} critical`
+      : status === "warning"
+        ? `Burnrate: ${warningCount} warning`
+        : status === "stale"
+          ? "Burnrate: data is stale"
+          : status === "healthy"
+            ? "Burnrate: all quotas healthy"
+            : "Burnrate: no enabled accounts";
 
   return {
     accounts,
     snapshots,
-    traySummary: {
-      label:
-        snapshots.length > 0
-          ? "Burnrate: all quotas healthy"
-          : "Burnrate: no enabled accounts",
-      status: snapshots.length > 0 ? "healthy" : "not-configured",
-      criticalCount: 0,
-      warningCount: 0,
+    traySummary: overrides.traySummary ?? {
+      label,
+      status,
+      criticalCount,
+      warningCount,
       updatedAt: new Date().toISOString(),
     },
     settings: overrides.settings ?? { hideFromDock: false },
+  };
+}
+
+function snapshot(
+  status: UsageSnapshot["status"],
+  overrides: Partial<UsageSnapshot> = {},
+): UsageSnapshot {
+  return {
+    accountId: `${status}-account`,
+    provider: "codex",
+    label: "Codex",
+    status,
+    subscription: {
+      plan: "pro",
+      planLabel: "Pro",
+      rateLimitTier: null,
+      extraUsageEnabled: true,
+      source: "test",
+    },
+    usageBuckets: [
+      {
+        id: "5-hour",
+        label: "5-hour",
+        window: "5-hour",
+        used: 25,
+        limit: 100,
+        remaining: 75,
+        unit: "%",
+        resetAt: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+        status,
+      },
+    ],
+    quota: {
+      used: 25,
+      limit: 100,
+      remaining: 75,
+      unit: "%",
+      resetAt: null,
+    },
+    message: null,
+    fetchedAt: new Date().toISOString(),
+    ...overrides,
   };
 }

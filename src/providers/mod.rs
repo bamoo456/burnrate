@@ -2,7 +2,11 @@ mod claude;
 mod codex;
 mod openrouter;
 
-use std::time::Duration;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 
 use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
@@ -17,10 +21,18 @@ use crate::{
 };
 
 const PROVIDER_TIMEOUT: Duration = Duration::from_secs(15);
+const PROVIDER_CACHE_TTL_MS: u64 = 5 * 60 * 1000;
 
 #[derive(Clone)]
 pub(crate) struct ProviderClient {
     http: Client,
+    cache: Arc<Mutex<HashMap<String, ProviderCacheEntry>>>,
+}
+
+#[derive(Clone)]
+struct ProviderCacheEntry {
+    snapshot: UsageSnapshot,
+    last_fetched_at: u64,
 }
 
 impl ProviderClient {
@@ -30,10 +42,16 @@ impl ProviderClient {
                 .timeout(PROVIDER_TIMEOUT)
                 .build()
                 .expect("provider HTTP client should build"),
+            cache: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
     pub(crate) async fn refresh_account(&self, account: &AccountConfig) -> UsageSnapshot {
+        let now = now_millis();
+        if let Some(snapshot) = self.cached_before_fetch(account, now) {
+            return snapshot;
+        }
+
         let result = match account.provider {
             ProviderKind::ClaudeCode => claude::fetch(&self.http, account).await,
             ProviderKind::Codex => codex::fetch(&self.http, account).await,
@@ -41,10 +59,55 @@ impl ProviderClient {
         };
 
         match result {
-            Ok(snapshot) => snapshot,
+            Ok(snapshot) => {
+                self.remember_success(account, snapshot.clone(), now);
+                snapshot
+            }
             Err(error) => error_snapshot(account, error),
         }
     }
+
+    fn cached_before_fetch(&self, account: &AccountConfig, now: u64) -> Option<UsageSnapshot> {
+        let cache = self.cache.lock().expect("provider cache lock");
+        let entry = cache.get(&cache_key(account))?;
+        let age = now.saturating_sub(entry.last_fetched_at);
+        (age < PROVIDER_CACHE_TTL_MS).then(|| entry.snapshot.clone())
+    }
+
+    fn remember_success(&self, account: &AccountConfig, snapshot: UsageSnapshot, now: u64) {
+        let mut cache = self.cache.lock().expect("provider cache lock");
+        let prefix = cache_key_prefix(account);
+        cache.retain(|key, _| !key.starts_with(&prefix));
+        cache.insert(
+            cache_key(account),
+            ProviderCacheEntry {
+                snapshot,
+                last_fetched_at: now,
+            },
+        );
+    }
+}
+
+fn cache_key(account: &AccountConfig) -> String {
+    format!(
+        "{}{}:{}",
+        cache_key_prefix(account),
+        account.endpoint_override.as_deref().unwrap_or_default(),
+        account.updated_at.timestamp_millis()
+    )
+}
+
+fn cache_key_prefix(account: &AccountConfig) -> String {
+    format!("{}:{}:", account.provider.as_str(), account.id)
+}
+
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock should be after UNIX_EPOCH")
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
 }
 
 pub(crate) fn detect_accounts() -> Vec<AccountConfig> {
@@ -58,7 +121,7 @@ pub(crate) fn detect_accounts() -> Vec<AccountConfig> {
     accounts
 }
 
-fn error_snapshot(account: &AccountConfig, error: anyhow::Error) -> UsageSnapshot {
+pub(crate) fn error_snapshot(account: &AccountConfig, error: anyhow::Error) -> UsageSnapshot {
     UsageSnapshot {
         account_id: account.id.clone(),
         provider: account.provider,
@@ -67,7 +130,6 @@ fn error_snapshot(account: &AccountConfig, error: anyhow::Error) -> UsageSnapsho
         subscription: None,
         usage_buckets: Vec::new(),
         quota: None,
-        burn_rate: None,
         message: Some(error.to_string()),
         fetched_at: Utc::now(),
     }
@@ -563,6 +625,10 @@ mod tests {
     use chrono::Utc;
     use serde_json::json;
     use tempfile::tempdir;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{header, method, path},
+    };
 
     use super::*;
     use crate::models::SecretStorageMode;
@@ -711,11 +777,68 @@ mod tests {
         assert!(error.to_string().contains("no credential found"));
     }
 
+    #[test]
+    fn cache_key_uses_stable_provider_name_and_edit_timestamp() {
+        let mut account = account();
+        account.id = "openrouter-main".to_string();
+        account.endpoint_override = Some("https://example.test".to_string());
+
+        let key = cache_key(&account);
+
+        assert!(key.starts_with("openrouter:openrouter-main:"));
+        assert!(key.contains("https://example.test"));
+        assert!(!key.contains("OpenRouter"));
+    }
+
+    #[test]
+    fn remember_success_prunes_stale_cache_entries_for_account() {
+        let provider = ProviderClient::new();
+        let mut account = account();
+        let first = error_snapshot(&account, anyhow!("old snapshot"));
+        provider.remember_success(&account, first, 0);
+
+        account.updated_at += chrono::Duration::seconds(1);
+        let second = error_snapshot(&account, anyhow!("new snapshot"));
+        provider.remember_success(&account, second, 1);
+
+        let cache = provider.cache.lock().expect("provider cache lock");
+        assert_eq!(cache.len(), 1);
+        assert!(cache.keys().all(|key| key.starts_with("openrouter:")));
+    }
+
     #[tokio::test]
     async fn refresh_account_maps_provider_errors_to_snapshots() {
         let snapshot = ProviderClient::new().refresh_account(&account()).await;
 
         assert_eq!(snapshot.status, SnapshotStatus::Error);
         assert!(snapshot.message.unwrap().contains("no credential found"));
+    }
+
+    #[tokio::test]
+    async fn refresh_account_uses_five_minute_success_cache() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .and(header("authorization", "Bearer sk-test"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "data": {
+                    "total_credits": 100.0,
+                    "total_usage": 40.0
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let mut account = account();
+        account.id = "provider-cache-openrouter".to_string();
+        account.endpoint_override = Some(server.uri());
+        account.plaintext_secret = Some("sk-test".to_string());
+        let provider = ProviderClient::new();
+        let first = provider.refresh_account(&account).await;
+        let second = provider.refresh_account(&account).await;
+
+        assert_eq!(first.quota.as_ref().unwrap().remaining, Some(60.0));
+        assert_eq!(second.quota.as_ref().unwrap().remaining, Some(60.0));
     }
 }
