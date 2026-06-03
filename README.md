@@ -1,9 +1,24 @@
 # Burnrate
 
 [![CI](https://github.com/jamesbrink/burnrate/actions/workflows/ci.yml/badge.svg)](https://github.com/jamesbrink/burnrate/actions/workflows/ci.yml)
+[![Release](https://github.com/jamesbrink/burnrate/actions/workflows/release.yml/badge.svg)](https://github.com/jamesbrink/burnrate/actions/workflows/release.yml)
+[![crates.io](https://img.shields.io/crates/v/burnrate.svg)](https://crates.io/crates/burnrate)
+[![downloads](https://img.shields.io/crates/d/burnrate.svg)](https://crates.io/crates/burnrate)
+[![latest release](https://img.shields.io/github/v/release/jamesbrink/burnrate?sort=semver)](https://github.com/jamesbrink/burnrate/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](https://github.com/jamesbrink/burnrate/releases/latest)
 
 Desktop usage monitor for Claude Code, Codex, OpenRouter, and Runpod quotas, credits, spend, and subscription limits. Built with Tauri 2 (Rust + React/TypeScript) and lives in the system tray (the menu bar on macOS).
+
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/preferences.png" alt="Burnrate Preferences window showing per-account usage across Claude Code, Codex, Runpod, and OpenRouter" width="62%" />
+  &nbsp;
+  <img src="docs/screenshots/tray.png" alt="Burnrate menu-bar popover with live quota meters for each account" width="30%" />
+</p>
+
+<p align="center"><em>The full Preferences window (left) and the menu-bar popover (right).</em></p>
 
 ## Features
 
@@ -18,6 +33,7 @@ Desktop usage monitor for Claude Code, Codex, OpenRouter, and Runpod quotas, cre
 - Runpod prepaid balance, current spend, burn-rate runway, active resources, and recent Pods/Serverless/storage costs.
 - Secrets in the OS keyring by default, with an explicit plaintext fallback.
 - Hides from the Dock by default; appears only while Preferences is open.
+- **Automatic updates (macOS)** with selectable **Stable** and **Nightly** channels: a dismissible banner and tray "Check for Updates…" entry offer a signature-verified one-click "Install & Restart." Choose the channel under Preferences → Updates.
 
 ## Install
 
@@ -58,7 +74,9 @@ Only non-secret account configuration is stored on disk. On macOS the default pa
 ## Releases
 
 - `release-plz` manages crate release PRs, version tags, and crates.io publishing.
-- Tagging `v*` builds native Tauri bundles (macOS, Linux, Windows) and uploads them with checksums to the GitHub Release.
+- Tagging `v*` builds native Tauri bundles (macOS, Linux, Windows) and uploads them with checksums to the GitHub Release, then publishes a signed `latest.json` (the **Stable** auto-update manifest).
+- A `nightly` workflow runs after green `CI` on `main`, building a signed macOS pre-release and promoting it to the rolling `nightly` release/manifest (the **Nightly** channel).
+- Auto-update signing uses a Tauri minisign keypair: the public key lives in `tauri.conf.json`; the private key + passphrase are the `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repo secrets.
 
 ## License
 
