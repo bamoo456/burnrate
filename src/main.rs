@@ -98,6 +98,18 @@ async fn start_account_login(
 ) -> Result<AccountView, String> {
     state
         .start_account_login(app.clone(), provider, label, account_id)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn submit_account_login_code(
+    state: State<'_, AppState>,
+    id: String,
+    code: String,
+) -> Result<(), String> {
+    state
+        .submit_account_login_code(&id, code)
         .map_err(|error| error.to_string())
 }
 
@@ -429,6 +441,7 @@ fn main() {
             detect_accounts,
             reorder_accounts,
             start_account_login,
+            submit_account_login_code,
             cancel_account_login,
             logout_account,
             refresh_snapshots,

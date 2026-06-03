@@ -1290,6 +1290,7 @@ html[data-view="tray"] .tray-empty {
 
 .login-modal {
   width: min(420px, 100%);
+  max-width: calc(100vw - 48px);
   border: 1px solid var(--hairline);
   border-radius: 12px;
   background: var(--surface);
@@ -1312,18 +1313,67 @@ html[data-view="tray"] .tray-empty {
 
 .login-status {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 9px;
   color: var(--fg-soft);
+}
+
+.login-status svg,
+.login-error svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.login-status span,
+.login-error span,
+.login-url {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .login-url a {
   color: var(--accent);
 }
 
-.login-error {
+.login-code-form {
+  display: grid;
+  gap: 8px;
+}
+
+.login-code-form label {
+  color: var(--fg-soft);
+  font-weight: 620;
+}
+
+.login-code-row {
   display: flex;
   align-items: center;
+  gap: 8px;
+}
+
+.login-code-row input {
+  min-width: 0;
+  flex: 1 1 auto;
+  height: 34px;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  background: var(--field-bg);
+  color: var(--fg);
+  padding: 7px 9px;
+}
+
+.login-code-row input::placeholder {
+  color: var(--fg-faint);
+}
+
+.login-code-error {
+  color: var(--crit);
+  overflow-wrap: anywhere;
+}
+
+.login-error {
+  display: flex;
+  align-items: flex-start;
   gap: 8px;
   color: var(--crit);
 }
@@ -1331,8 +1381,16 @@ html[data-view="tray"] .tray-empty {
 .login-actions {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+@media (max-width: 420px) {
+  .login-code-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 
 /* Tray variants */
