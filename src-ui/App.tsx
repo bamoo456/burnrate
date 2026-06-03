@@ -9,13 +9,16 @@ import {
 import {
   closePreferences,
   detectAccounts,
-  loadDashboard,
+  guardedFetch,
+  isStale,
+  markFetched,
   onDashboardUpdated,
   onRefreshRequested,
   onSettingsUpdated,
-  refreshDashboard,
+  readCachedDashboard,
   removeAccount,
   resizePreferencesToContent,
+  resizeTrayToContent,
   saveAccount,
 } from "./api";
 import {
@@ -35,44 +38,53 @@ import type {
 export function App() {
   const isTrayView =
     new URLSearchParams(window.location.search).get("view") === "tray";
-  const [state, setState] = useState<DashboardState | null>(null);
-  const [snapshots, setSnapshots] = useState<UsageSnapshot[]>([]);
+  const [state, setState] = useState<DashboardState | null>(
+    () => readCachedDashboard()?.dashboard ?? null,
+  );
+  const [snapshots, setSnapshots] = useState<UsageSnapshot[]>(
+    () => readCachedDashboard()?.dashboard.snapshots ?? [],
+  );
   const [form, setForm] = useState<AccountInput>(emptyForm);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [busy, setBusy] = useState(true);
+  // Spinner only on a true cold start (no cached data to show).
+  const [busy, setBusy] = useState(() => readCachedDashboard() === null);
   const [error, setError] = useState<string | null>(null);
   const lastPreferenceSize = useRef({ width: 0, height: 0 });
+  const lastTrayHeight = useRef(0);
+  // Mirror of `state` so the mount-captured `revalidate` can decide whether to
+  // show the cold-start spinner without going stale.
+  const stateRef = useRef<DashboardState | null>(state);
+  stateRef.current = state;
 
-  async function reload() {
-    setBusy(true);
-    setError(null);
-    try {
-      const dashboard = await loadDashboard();
-      setState(dashboard);
-      setSnapshots(dashboard.snapshots);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
+  async function revalidate(options: { force?: boolean } = {}) {
+    // Background refreshes (tray open, stale revalidation) shouldn't flash a
+    // spinner when we already have data to show; cold starts and explicit
+    // manual refreshes do.
+    const showSpinner = options.force === true || stateRef.current === null;
+    if (showSpinner) {
+      setBusy(true);
     }
-  }
-
-  async function refreshOnly() {
-    setBusy(true);
     setError(null);
     try {
-      const dashboard = await refreshDashboard();
+      const dashboard = await guardedFetch(options);
       setState(dashboard);
       setSnapshots(dashboard.snapshots);
     } catch (err) {
       setError(String(err));
     } finally {
-      setBusy(false);
+      if (showSpinner) {
+        setBusy(false);
+      }
     }
   }
 
   useEffect(() => {
-    void reload();
+    const cached = readCachedDashboard();
+    if (cached && !isStale(cached.fetchedAt)) {
+      return;
+    }
+    void revalidate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -99,7 +111,7 @@ export function App() {
   useEffect(() => {
     let cleanup: (() => void) | undefined;
     let disposed = false;
-    void onRefreshRequested(refreshOnly).then((unlisten) => {
+    void onRefreshRequested(() => void revalidate()).then((unlisten) => {
       if (disposed) {
         unlisten();
       } else {
@@ -126,6 +138,9 @@ export function App() {
     void onDashboardUpdated((dashboard) => {
       setState(dashboard);
       setSnapshots(dashboard.snapshots);
+      // Backend push already carries fresh data — cache it and reset the
+      // throttle window so we don't immediately re-fetch.
+      markFetched(dashboard);
     }).then((unlisten) => {
       if (disposed) {
         unlisten();
@@ -244,6 +259,51 @@ export function App() {
     form.secretStorage,
   ]);
 
+  useLayoutEffect(() => {
+    if (!isTrayView) {
+      return;
+    }
+    const panel = document.querySelector<HTMLElement>(".tray-panel");
+    if (!panel) {
+      return;
+    }
+
+    let frame = 0;
+    const measure = () => {
+      const px = (value: string) => Number.parseFloat(value) || 0;
+      const style = window.getComputedStyle(panel);
+      const paddingY = px(style.paddingTop) + px(style.paddingBottom);
+      const rowGap = px(style.rowGap || style.gap);
+      // Only height is reported: the tray width is pinned to the design width by
+      // the backend. Sum the intrinsic height of each child rather than reading
+      // panel.scrollHeight, which is pinned by `min-height: 100vh` and would
+      // never let the window shrink.
+      const children = Array.from(panel.children) as HTMLElement[];
+      const contentHeight =
+        children.reduce((sum, child) => sum + child.offsetHeight, 0) +
+        rowGap * Math.max(0, children.length - 1);
+      const height = Math.ceil(contentHeight + paddingY);
+      if (height <= 0) {
+        return;
+      }
+      if (Math.abs(height - lastTrayHeight.current) <= 1) {
+        return;
+      }
+      lastTrayHeight.current = height;
+      void resizeTrayToContent(height);
+    };
+    const scheduleMeasure = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(measure);
+    };
+
+    scheduleMeasure();
+
+    return () => {
+      cancelAnimationFrame(frame);
+    };
+  }, [isTrayView, snapshots, error, busy, accounts.length, summary.label]);
+
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
     const endpoint = form.endpointOverride?.trim() || null;
@@ -262,7 +322,7 @@ export function App() {
       updateAccounts(accounts, settings, summary);
       setForm(emptyForm);
       setActiveId(null);
-      const dashboard = await refreshDashboard();
+      const dashboard = await guardedFetch({ force: true });
       setState(dashboard);
       setSnapshots(dashboard.snapshots);
     } catch (err) {
@@ -287,11 +347,21 @@ export function App() {
     });
   }
 
+  // After an account mutation, re-fetch and re-cache the dashboard so the
+  // persisted cache can't resurrect the old account list / a removed account's
+  // snapshot on the next reload (mirrors the post-save flow in onSubmit).
+  async function applyAccountChange(accounts: AccountView[]) {
+    updateAccounts(accounts, settings, summary);
+    const dashboard = await guardedFetch({ force: true });
+    setState(dashboard);
+    setSnapshots(dashboard.snapshots);
+  }
+
   async function onRemove(id: string) {
     setBusy(true);
     setError(null);
     try {
-      updateAccounts(await removeAccount(id), settings, summary);
+      await applyAccountChange(await removeAccount(id));
     } catch (err) {
       setError(String(err));
     } finally {
@@ -303,7 +373,7 @@ export function App() {
     setBusy(true);
     setError(null);
     try {
-      updateAccounts(await detectAccounts(), settings, summary);
+      await applyAccountChange(await detectAccounts());
     } catch (err) {
       setError(String(err));
     } finally {
@@ -330,7 +400,7 @@ export function App() {
         snapshots={snapshots}
         busy={busy}
         error={error}
-        onRefresh={() => void refreshOnly()}
+        onRefresh={() => void revalidate({ force: true })}
       />
     );
   }
@@ -348,7 +418,7 @@ export function App() {
       setActiveId={setActiveId}
       onSubmit={(event) => void onSubmit(event)}
       onDetect={() => void onDetect()}
-      onRefresh={() => void refreshOnly()}
+      onRefresh={() => void revalidate({ force: true })}
       onEditAccount={editAccount}
       onRemoveAccount={(id) => void onRemove(id)}
     />

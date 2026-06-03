@@ -14,8 +14,8 @@ use std::time::Duration;
 #[cfg(target_os = "macos")]
 use tauri::menu::{IsMenuItem, PredefinedMenuItem, Submenu};
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, LogicalUnit, Manager, PixelUnit, Position,
-    Size, State, WindowSizeConstraints, Wry, menu::Menu,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, LogicalUnit, Manager, PhysicalPosition,
+    PhysicalSize, PixelUnit, Position, Size, State, WindowSizeConstraints, Wry, menu::Menu,
 };
 
 const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
@@ -23,6 +23,10 @@ const PREFERENCES_MIN_WIDTH: f64 = 360.0;
 const PREFERENCES_MIN_HEIGHT: f64 = 360.0;
 const PREFERENCES_MAX_CONTENT_WIDTH: f64 = 1180.0;
 const PREFERENCES_SCREEN_MARGIN: f64 = 18.0;
+const TRAY_CONTENT_WIDTH: f64 = 360.0;
+const TRAY_MIN_HEIGHT: f64 = 200.0;
+const TRAY_SCREEN_MARGIN: f64 = 8.0;
+const TRAY_OFFSET_Y: f64 = 12.0;
 
 #[tauri::command]
 async fn dashboard(app: AppHandle, state: State<'_, AppState>) -> Result<DashboardState, String> {
@@ -147,6 +151,107 @@ fn resize_preferences_to_content(app: AppHandle, width: f64, height: f64) -> Res
 }
 
 #[tauri::command]
+fn resize_tray_to_content(
+    app: AppHandle,
+    state: State<'_, tray::TrayWindowState>,
+    height: f64,
+) -> Result<(), String> {
+    let window = app
+        .get_webview_window(tray::TRAY_WINDOW)
+        .ok_or_else(|| "tray window is unavailable".to_string())?;
+    let scale_factor = window.scale_factor().map_err(|error| error.to_string())?;
+    let inner = window
+        .inner_size()
+        .map_err(|error| error.to_string())?
+        .to_logical::<f64>(scale_factor);
+    let outer = window
+        .outer_size()
+        .map_err(|error| error.to_string())?
+        .to_logical::<f64>(scale_factor);
+    let chrome_width = (outer.width - inner.width).max(0.0);
+    let chrome_height = (outer.height - inner.height).max(0.0);
+    let monitor = window
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .or(window
+            .primary_monitor()
+            .map_err(|error| error.to_string())?)
+        .ok_or_else(|| "no monitor available for tray window".to_string())?;
+    let work_area = monitor.work_area();
+    let work_size = work_area.size.to_logical::<f64>(monitor.scale_factor());
+
+    let available_width = (work_size.width - (TRAY_SCREEN_MARGIN * 2.0)).max(1.0);
+    let available_height = (work_size.height - (TRAY_SCREEN_MARGIN * 2.0)).max(1.0);
+    // Width is fixed to the design width; the frontend only reports content height.
+    let target_width = (TRAY_CONTENT_WIDTH + chrome_width)
+        .ceil()
+        .min(available_width);
+    let target_height = tray::clamp_tray_height(
+        height,
+        chrome_height,
+        work_size.height,
+        TRAY_SCREEN_MARGIN,
+        TRAY_MIN_HEIGHT,
+    );
+
+    window
+        .set_size_constraints(WindowSizeConstraints {
+            // Pin the width (min == max) so the popover can never be widened.
+            min_width: Some(PixelUnit::Logical(LogicalUnit::new(target_width))),
+            min_height: Some(PixelUnit::Logical(LogicalUnit::new(
+                TRAY_MIN_HEIGHT.min(target_height),
+            ))),
+            max_width: Some(PixelUnit::Logical(LogicalUnit::new(target_width))),
+            max_height: Some(PixelUnit::Logical(LogicalUnit::new(available_height))),
+        })
+        .map_err(|error| error.to_string())?;
+    window
+        .set_size(Size::Logical(LogicalSize::new(target_width, target_height)))
+        .map_err(|error| error.to_string())?;
+
+    // Re-anchor in physical pixels (unambiguous across monitors) from the
+    // physical cursor anchor recorded at show time. The popover is already on
+    // the clicked monitor, so its current monitor is the right one to clamp to.
+    let m_scale = monitor.scale_factor();
+    let work_pos_phys =
+        PhysicalPosition::new(work_area.position.x as f64, work_area.position.y as f64);
+    let work_size_phys =
+        PhysicalSize::new(work_area.size.width as f64, work_area.size.height as f64);
+    let window_phys = PhysicalSize::new(target_width * m_scale, target_height * m_scale);
+    let margin = TRAY_SCREEN_MARGIN * m_scale;
+    let target = match state.anchor() {
+        Some(anchor) => tray::popup_position(
+            anchor,
+            window_phys,
+            work_pos_phys,
+            work_size_phys,
+            margin,
+            TRAY_OFFSET_Y * m_scale,
+        ),
+        None => {
+            let current = window.outer_position().map_err(|error| error.to_string())?;
+            let min_x = work_pos_phys.x + margin;
+            let min_y = work_pos_phys.y + margin;
+            let max_x =
+                (work_pos_phys.x + work_size_phys.width - window_phys.width - margin).max(min_x);
+            let max_y =
+                (work_pos_phys.y + work_size_phys.height - window_phys.height - margin).max(min_y);
+            PhysicalPosition::new(
+                (current.x as f64).clamp(min_x, max_x),
+                (current.y as f64).clamp(min_y, max_y),
+            )
+        }
+    };
+
+    window
+        .set_position(PhysicalPosition::new(
+            target.x.round() as i32,
+            target.y.round() as i32,
+        ))
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn close_preferences(app: AppHandle) {
     tray::close_main_window(&app);
 }
@@ -211,6 +316,7 @@ fn main() {
     tauri::Builder::default()
         .menu(build_app_menu)
         .manage(state)
+        .manage(tray::TrayWindowState::default())
         .setup(move |app| {
             tray::apply_activation_policy(app.handle(), true);
             tray::set_dock_icon_if_unbundled();
@@ -223,7 +329,17 @@ fn main() {
                     }
                 });
             }
+            // Dismiss the tray popover when it loses focus (click-away / app switch).
+            if let Some(window) = app.get_webview_window(tray::TRAY_WINDOW) {
+                let app_handle = app.handle().clone();
+                window.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(false) = event {
+                        tray::hide_tray_window(&app_handle);
+                    }
+                });
+            }
             tray::install(app)?;
+            tray::apply_tray_vibrancy(app.handle());
             spawn_background_refresh(app.handle().clone());
             Ok(())
         })
@@ -236,6 +352,7 @@ fn main() {
             detect_accounts,
             refresh_snapshots,
             resize_preferences_to_content,
+            resize_tray_to_content,
             close_preferences
         ])
         .run(tauri::generate_context!())
