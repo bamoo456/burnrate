@@ -9,7 +9,9 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import {
   bucketFromQuota,
+  bucketMeterLabel,
   bucketPercent,
+  displayBuckets,
   formatLimit,
   formatNumber,
   formatReset,
@@ -595,6 +597,49 @@ test("formats quota fallback and reset edge cases", () => {
     }),
   ).toBe("Unknown");
   expect(
+    displayBuckets(
+      snapshot("healthy", {
+        usageBuckets: [
+          {
+            id: "unknown",
+            label: "Unknown",
+            window: null,
+            used: 0,
+            limit: null,
+            remaining: null,
+            unit: "USD",
+            resetAt: null,
+            status: "healthy",
+          },
+          {
+            id: "current-burn",
+            label: "Current burn",
+            window: null,
+            used: 0,
+            limit: 80,
+            remaining: null,
+            unit: "USD/hr",
+            resetAt: null,
+            status: "healthy",
+          },
+        ],
+      }),
+    ).map((bucket) => bucket.id),
+  ).toEqual(["current-burn"]);
+  expect(
+    formatLimit({
+      id: "burn",
+      label: "Burn",
+      window: null,
+      used: 1.25,
+      limit: 80,
+      remaining: null,
+      unit: "USD/hr",
+      resetAt: null,
+      status: "healthy",
+    }),
+  ).toBe("$1.25 / $80");
+  expect(
     formatLimit({
       id: "credits",
       label: "Credits",
@@ -607,6 +652,19 @@ test("formats quota fallback and reset edge cases", () => {
       status: "healthy",
     }),
   ).toBe("$58.6 / $125");
+  expect(
+    bucketMeterLabel({
+      id: "burn",
+      label: "Current burn",
+      window: null,
+      used: 1.25,
+      limit: 80,
+      remaining: null,
+      unit: "USD/hr",
+      resetAt: null,
+      status: "healthy",
+    }),
+  ).toBe("Current burn usage");
   expect(
     bucketPercent({
       id: "over",

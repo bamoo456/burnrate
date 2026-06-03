@@ -6,6 +6,17 @@ export function primaryBucket(
   return snapshot.usageBuckets[0] ?? bucketFromQuota(snapshot);
 }
 
+export function displayBuckets(snapshot: UsageSnapshot): UsageBucketSnapshot[] {
+  const buckets = snapshot.usageBuckets.filter(hasBucketValue);
+  if (buckets.length > 0) return buckets;
+  const fallback = bucketFromQuota(snapshot);
+  return fallback && hasBucketValue(fallback) ? [fallback] : [];
+}
+
+export function hasBucketValue(bucket: UsageBucketSnapshot): boolean {
+  return bucket.limit !== null || bucket.remaining !== null || bucket.used !== 0;
+}
+
 export function bucketFromQuota(
   snapshot: UsageSnapshot,
 ): UsageBucketSnapshot | null {
@@ -24,8 +35,15 @@ export function bucketFromQuota(
 }
 
 export function bucketPercent(bucket: UsageBucketSnapshot): number {
-  if (!bucket.limit || bucket.remaining === null) return 0;
-  return Math.max(0, Math.min(100, (bucket.remaining / bucket.limit) * 100));
+  if (!bucket.limit) return 0;
+  const value = bucket.remaining === null ? bucket.used : bucket.remaining;
+  return Math.max(0, Math.min(100, (value / bucket.limit) * 100));
+}
+
+export function bucketMeterLabel(bucket: UsageBucketSnapshot): string {
+  return bucket.remaining === null
+    ? `${bucket.label} usage`
+    : `${bucket.label} remaining`;
 }
 
 export function formatNumber(value: number): string {
@@ -35,20 +53,22 @@ export function formatNumber(value: number): string {
 }
 
 export function formatLimit(bucket: UsageBucketSnapshot): string {
-  const remaining =
+  const value =
     bucket.remaining === null
-      ? "Unknown"
+      ? bucket.limit === null && bucket.used === 0
+        ? "Unknown"
+        : formatBucketNumber(bucket.used, bucket.unit)
       : formatBucketNumber(bucket.remaining, bucket.unit);
   const limit =
     bucket.limit === null
       ? ""
       : ` / ${formatBucketNumber(bucket.limit, bucket.unit)}`;
-  return `${remaining}${limit}`;
+  return `${value}${limit}`;
 }
 
 function formatBucketNumber(value: number, unit: string): string {
   const formatted = formatNumber(value);
-  return unit === "USD" ? `$${formatted}` : formatted;
+  return unit.startsWith("USD") ? `$${formatted}` : formatted;
 }
 
 export function formatReset(value: string | null): string {

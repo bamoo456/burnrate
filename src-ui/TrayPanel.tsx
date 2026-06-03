@@ -1,9 +1,10 @@
 import { AlertCircle, Clock3, RefreshCw, ShieldCheck } from "lucide-react";
 import {
+  bucketMeterLabel,
   bucketPercent,
+  displayBuckets,
   formatLimit,
   formatReset,
-  primaryBucket,
 } from "./format";
 import { ProviderLogo } from "./ProviderLogo";
 import type {
@@ -18,6 +19,7 @@ const providerLabels = {
   "claude-code": "Claude",
   codex: "Codex",
   openrouter: "OpenRouter",
+  runpod: "Runpod",
 } as const;
 
 const statusLabels: Record<SnapshotStatus, string> = {
@@ -91,14 +93,8 @@ export function TrayPanel({
 }
 
 function TraySnapshot({ snapshot }: { snapshot: UsageSnapshot }) {
-  const bucket = primaryBucket(snapshot);
-  const buckets =
-    snapshot.usageBuckets.length > 0
-      ? snapshot.usageBuckets
-      : bucket
-        ? [bucket]
-        : [];
-  const plan = snapshot.subscription?.planLabel ?? "Unknown plan";
+  const buckets = displayBuckets(snapshot);
+  const plan = snapshot.subscription?.planLabel;
 
   return (
     <article className={`tray-card ${snapshot.status}`}>
@@ -115,13 +111,15 @@ function TraySnapshot({ snapshot }: { snapshot: UsageSnapshot }) {
         </span>
       </div>
 
-      <div className="tray-plan">
-        <ShieldCheck size={14} />
-        <span>{plan}</span>
-        {snapshot.subscription?.extraUsageEnabled ? (
-          <small>extra usage</small>
-        ) : null}
-      </div>
+      {plan ? (
+        <div className="tray-plan">
+          <ShieldCheck size={14} />
+          <span>{plan}</span>
+          {snapshot.subscription?.extraUsageEnabled ? (
+            <small>extra usage</small>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="bucket-list">
         {buckets.map((bucket) => (
@@ -145,7 +143,7 @@ function BucketRow({ bucket }: { bucket: UsageBucketSnapshot }) {
           {formatLimit(bucket)} {bucket.unit}
         </strong>
       </div>
-      <div className="mini-meter" aria-label={`${bucket.label} remaining`}>
+      <div className="mini-meter" aria-label={bucketMeterLabel(bucket)}>
         <span style={{ width: `${bucketPercent(bucket)}%` }} />
       </div>
       {bucket.resetAt ? (

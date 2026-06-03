@@ -10,10 +10,11 @@ import {
 } from "lucide-react";
 import type { Dispatch, FormEvent, SetStateAction } from "react";
 import {
+  bucketMeterLabel,
   bucketPercent,
+  displayBuckets,
   formatLimit,
   formatReset,
-  primaryBucket,
 } from "./format";
 import { ProviderLogo } from "./ProviderLogo";
 import type {
@@ -28,15 +29,18 @@ import type {
 
 export const OPENROUTER_DEFAULT_ENDPOINT =
   "https://openrouter.ai/api/v1/credits";
+export const RUNPOD_DEFAULT_ENDPOINT = "https://rest.runpod.io/v1";
 
 export const providerLabels: Record<ProviderKind, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   openrouter: "OpenRouter",
+  runpod: "Runpod",
 };
 
 const providerDefaultEndpoints: Partial<Record<ProviderKind, string>> = {
   openrouter: OPENROUTER_DEFAULT_ENDPOINT,
+  runpod: RUNPOD_DEFAULT_ENDPOINT,
 };
 
 const statusLabels: Record<SnapshotStatus, string> = {
@@ -202,6 +206,7 @@ export function Preferences({
                   }
                 >
                   <option value="openrouter">OpenRouter</option>
+                  <option value="runpod">Runpod</option>
                   <option value="claude-code">Claude Code</option>
                   <option value="codex">Codex</option>
                 </select>
@@ -348,9 +353,8 @@ function AccountButton({
 }
 
 function UsageRow({ snapshot }: { snapshot: UsageSnapshot }) {
-  const buckets = snapshot.usageBuckets.length > 0 ? snapshot.usageBuckets : [];
-  const primary = primaryBucket(snapshot);
-  const plan = snapshot.subscription?.planLabel ?? "Unknown plan";
+  const buckets = displayBuckets(snapshot);
+  const plan = snapshot.subscription?.planLabel;
 
   return (
     <article className={`usage-row ${snapshot.status}`}>
@@ -360,7 +364,8 @@ function UsageRow({ snapshot }: { snapshot: UsageSnapshot }) {
           <span>
             <strong>{snapshot.label}</strong>
             <small>
-              {providerLabels[snapshot.provider]} · {plan}
+              {providerLabels[snapshot.provider]}
+              {plan ? ` · ${plan}` : ""}
             </small>
           </span>
         </div>
@@ -371,10 +376,6 @@ function UsageRow({ snapshot }: { snapshot: UsageSnapshot }) {
           {buckets.map((bucket) => (
             <BucketLine key={bucket.id} bucket={bucket} />
           ))}
-        </div>
-      ) : primary ? (
-        <div className="usage-buckets">
-          <BucketLine bucket={primary} />
         </div>
       ) : (
         <p className="snapshot-message">
@@ -397,7 +398,7 @@ function BucketLine({ bucket }: { bucket: UsageBucketSnapshot }) {
           {formatLimit(bucket)} {bucket.unit}
         </strong>
       </div>
-      <div className="meter" aria-label={`${bucket.label} remaining`}>
+      <div className="meter" aria-label={bucketMeterLabel(bucket)}>
         <span style={{ width: `${bucketPercent(bucket)}%` }} />
       </div>
       <small>{formatReset(bucket.resetAt)}</small>
