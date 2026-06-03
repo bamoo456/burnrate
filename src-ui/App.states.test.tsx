@@ -1,10 +1,12 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
   waitFor,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App";
 import {
@@ -20,20 +22,27 @@ import { TrayPanel } from "./TrayPanel";
 import type { AccountView, DashboardState, UsageSnapshot } from "./types";
 
 const api = vi.hoisted(() => ({
+  cancelAccountLogin: vi.fn(),
   closePreferences: vi.fn(),
   detectAccounts: vi.fn(),
   guardedFetch: vi.fn(),
   isStale: vi.fn(),
+  logoutAccount: vi.fn(),
   markFetched: vi.fn(),
   onDashboardUpdated: vi.fn(),
+  onLoginComplete: vi.fn(),
+  onLoginFailed: vi.fn(),
+  onLoginProgress: vi.fn(),
   onRefreshRequested: vi.fn(),
   onSettingsUpdated: vi.fn(),
   readCachedDashboard: vi.fn(),
   removeAccount: vi.fn(),
+  reorderAccounts: vi.fn(),
   resizePreferencesToContent: vi.fn(),
   resizeTrayToContent: vi.fn(),
   saveAccount: vi.fn(),
   saveSettings: vi.fn(),
+  startAccountLogin: vi.fn(),
 }));
 
 vi.mock("./api", () => api);
@@ -43,6 +52,13 @@ beforeEach(() => {
   api.onDashboardUpdated.mockResolvedValue(() => {});
   api.onRefreshRequested.mockResolvedValue(() => {});
   api.onSettingsUpdated.mockResolvedValue(() => {});
+  api.onLoginProgress.mockResolvedValue(() => {});
+  api.onLoginComplete.mockResolvedValue(() => {});
+  api.onLoginFailed.mockResolvedValue(() => {});
+  api.reorderAccounts.mockResolvedValue([]);
+  api.logoutAccount.mockResolvedValue([]);
+  api.startAccountLogin.mockResolvedValue({ id: "pending-1" });
+  api.cancelAccountLogin.mockResolvedValue([]);
   api.guardedFetch.mockResolvedValue(dashboardState());
   // Default: cold start (no cached dashboard) so existing tests exercise the
   // fetch-on-mount path and the loading spinner.
@@ -229,6 +245,8 @@ test("renders compact tray view from the tray window route", async () => {
           endpointOverride: null,
           secretStorage: "keyring",
           hasSecret: false,
+          email: "codex@example.com",
+          configDir: null,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         },
@@ -318,17 +336,17 @@ test("refreshes usage after saving an OpenRouter account", async () => {
     endpointOverride: null,
     secretStorage: "keyring",
     hasSecret: true,
+    email: null,
+    configDir: null,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  api.guardedFetch
-    .mockResolvedValueOnce(dashboardState())
-    .mockResolvedValue(
-      dashboardState({
-        accounts: [savedAccount],
-        snapshots: [snapshot("healthy", { accountId: "openrouter-team" })],
-      }),
-    );
+  api.guardedFetch.mockResolvedValueOnce(dashboardState()).mockResolvedValue(
+    dashboardState({
+      accounts: [savedAccount],
+      snapshots: [snapshot("healthy", { accountId: "openrouter-team" })],
+    }),
+  );
   api.saveAccount.mockResolvedValue([savedAccount]);
 
   render(<App />);
@@ -425,6 +443,8 @@ test("renders tray summary branches and account disabled state", () => {
             endpointOverride: null,
             secretStorage: "plaintext",
             hasSecret: true,
+            email: null,
+            configDir: null,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
           },
@@ -434,6 +454,7 @@ test("renders tray summary branches and account disabled state", () => {
       busy={false}
       error="network offline"
       onRefresh={() => {}}
+      onReorderAccounts={() => {}}
     />,
   );
 
@@ -448,6 +469,7 @@ test("renders tray summary branches and account disabled state", () => {
       busy={false}
       error={null}
       onRefresh={() => {}}
+      onReorderAccounts={() => {}}
     />,
   );
   expect(screen.getByText("Critical usage")).toBeInTheDocument();
@@ -459,6 +481,7 @@ test("renders tray summary branches and account disabled state", () => {
       busy={false}
       error={null}
       onRefresh={() => {}}
+      onReorderAccounts={() => {}}
     />,
   );
   expect(screen.getByText("Usage data is stale")).toBeInTheDocument();
@@ -470,6 +493,7 @@ test("renders tray summary branches and account disabled state", () => {
       busy
       error={null}
       onRefresh={() => {}}
+      onReorderAccounts={() => {}}
     />,
   );
   expect(screen.getByText("All quotas healthy")).toBeInTheDocument();
@@ -478,13 +502,11 @@ test("renders tray summary branches and account disabled state", () => {
 
 test("dispatches tray refresh requests", async () => {
   window.history.replaceState({}, "", "/?view=tray");
-  api.guardedFetch
-    .mockResolvedValueOnce(dashboardState())
-    .mockResolvedValue(
-      dashboardState({
-        snapshots: [snapshot("healthy")],
-      }),
-    );
+  api.guardedFetch.mockResolvedValueOnce(dashboardState()).mockResolvedValue(
+    dashboardState({
+      snapshots: [snapshot("healthy")],
+    }),
+  );
 
   render(<App />);
 
@@ -573,6 +595,7 @@ test("renders a tray snapshot from the quota fallback with an inline message", (
       busy={false}
       error={null}
       onRefresh={() => {}}
+      onReorderAccounts={() => {}}
     />,
   );
 
@@ -776,3 +799,139 @@ function snapshot(
     ...overrides,
   };
 }
+
+function accountView(overrides: Partial<AccountView> = {}): AccountView {
+  return {
+    id: "claude-1",
+    provider: "claude-code",
+    label: "Claude Code",
+    enabled: true,
+    autoDetected: false,
+    credentialPath: null,
+    endpointOverride: null,
+    secretStorage: "keyring",
+    hasSecret: false,
+    email: null,
+    configDir: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+test("shows the account email in the preferences list and usage", async () => {
+  api.guardedFetch.mockResolvedValue(
+    dashboardState({
+      accounts: [
+        accountView({ id: "c1", label: "Work", email: "work@example.com" }),
+      ],
+      snapshots: [
+        snapshot("healthy", {
+          accountId: "c1",
+          provider: "claude-code",
+          label: "Work",
+          email: "work@example.com",
+        }),
+      ],
+    }),
+  );
+
+  render(<App />);
+
+  expect(
+    (await screen.findAllByText("work@example.com")).length,
+  ).toBeGreaterThan(0);
+});
+
+test("completing a sign-in closes the modal and force-refreshes", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByRole("heading", { name: "Accounts" });
+
+  await user.click(screen.getByRole("button", { name: "Add account" }));
+  await user.click(screen.getByRole("menuitem", { name: /Claude Code/ }));
+  await user.click(
+    screen.getByRole("menuitem", { name: /Sign in with browser/ }),
+  );
+
+  expect(api.startAccountLogin).toHaveBeenCalledWith(
+    "claude-code",
+    "Claude Code",
+    undefined,
+  );
+  expect(
+    await screen.findByRole("dialog", { name: /Sign in to Claude Code/ }),
+  ).toBeInTheDocument();
+
+  const completeHandler = api.onLoginComplete.mock.calls[0][0];
+  await act(async () => {
+    await completeHandler({
+      id: "pending-1",
+      account: accountView({ id: "pending-1", email: "new@example.com" }),
+    });
+  });
+
+  await waitFor(() =>
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+  );
+  expect(api.guardedFetch).toHaveBeenCalledWith({ force: true });
+});
+
+test("a failed sign-in shows the error and retries", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByRole("heading", { name: "Accounts" });
+
+  await user.click(screen.getByRole("button", { name: "Add account" }));
+  await user.click(screen.getByRole("menuitem", { name: /Codex/ }));
+  await user.click(
+    screen.getByRole("menuitem", { name: /Sign in with browser/ }),
+  );
+
+  const failHandler = api.onLoginFailed.mock.calls[0][0];
+  await act(async () => {
+    failHandler({ id: "pending-1", error: "Sign-in timed out." });
+  });
+
+  expect(await screen.findByText("Sign-in timed out.")).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Try again" }));
+  expect(api.startAccountLogin).toHaveBeenCalledTimes(2);
+});
+
+test("sign in again re-authenticates the existing account in place", async () => {
+  const user = userEvent.setup();
+  api.guardedFetch.mockResolvedValue(
+    dashboardState({
+      accounts: [accountView({ id: "claude-local", label: "Default Claude" })],
+      snapshots: [],
+    }),
+  );
+
+  render(<App />);
+  await user.click(await screen.findByText("Default Claude"));
+  await user.click(screen.getByRole("button", { name: /Sign in again/ }));
+
+  // The existing account id is threaded through so the backend re-auths in place.
+  expect(api.startAccountLogin).toHaveBeenCalledWith(
+    "claude-code",
+    "Claude Code",
+    "claude-local",
+  );
+});
+
+test("signing out an account calls logoutAccount", async () => {
+  const user = userEvent.setup();
+  api.guardedFetch.mockResolvedValue(
+    dashboardState({
+      accounts: [accountView({ id: "c1", label: "Work Claude" })],
+      snapshots: [],
+    }),
+  );
+  api.logoutAccount.mockResolvedValue([]);
+
+  render(<App />);
+  await user.click(await screen.findByText("Work Claude"));
+  await user.click(screen.getByRole("button", { name: /Sign out/ }));
+
+  expect(api.logoutAccount).toHaveBeenCalledWith("c1");
+});

@@ -56,6 +56,8 @@ struct ClaudeAuthStatus {
     auth_method: Option<String>,
     api_provider: Option<String>,
     subscription_type: Option<String>,
+    #[serde(default)]
+    email: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -109,6 +111,7 @@ struct ClaudeOAuthUsage {
     subscription_type: Option<String>,
     rate_limit_tier: Option<String>,
     usage: ClaudeUsageData,
+    email: Option<String>,
 }
 
 pub(crate) fn detect() -> Option<AccountConfig> {
@@ -174,8 +177,9 @@ pub(crate) async fn fetch(http: &Client, account: &AccountConfig) -> Result<Usag
 }
 
 async fn fetch_oauth_usage(http: &Client, account: &AccountConfig) -> Result<ClaudeOAuthUsage> {
+    let mut email = None;
     if should_check_claude_auth(account) {
-        ensure_claude_code_auth().await?;
+        email = ensure_claude_code_auth(account.cli_config_dir()).await?;
     }
     let credentials = read_credentials(account).await?;
     let oauth = credentials.claude_ai_oauth;
@@ -224,6 +228,7 @@ async fn fetch_oauth_usage(http: &Client, account: &AccountConfig) -> Result<Cla
         subscription_type: oauth.subscription_type,
         rate_limit_tier: oauth.rate_limit_tier,
         usage,
+        email,
     })
 }
 
@@ -359,9 +364,12 @@ async fn read_credentials(account: &AccountConfig) -> Result<CredentialFile> {
             return Ok(creds);
         }
 
-        match tokio::task::spawn_blocking(read_macos_keychain_credentials)
-            .await
-            .context("Claude Code credential reader panicked")?
+        let account_for_keychain = account.clone();
+        match tokio::task::spawn_blocking(move || {
+            read_macos_keychain_credentials(&account_for_keychain)
+        })
+        .await
+        .context("Claude Code credential reader panicked")?
         {
             Ok(creds) => Ok(creds),
             Err(keychain_error) => {
@@ -387,10 +395,31 @@ async fn read_credentials(account: &AccountConfig) -> Result<CredentialFile> {
     }
 }
 
+/// Best-effort deletion of the macOS Keychain credential for an account. Used as
+/// a fallback during sign-out/removal: Claude stores its OAuth token in the
+/// Keychain (keyed by the per-account config dir), which a failed
+/// `claude auth logout` would otherwise leave orphaned after the dir is deleted.
 #[cfg(target_os = "macos")]
-fn read_macos_keychain_credentials() -> Result<CredentialFile> {
+pub(crate) fn delete_keychain_credentials(account: &AccountConfig) {
+    delete_keychain_credentials_for_dir(account.cli_config_dir());
+}
+
+/// Like [`delete_keychain_credentials`] but keyed directly by a config dir, for
+/// clearing the credential of a *stale* dir that is about to be discarded (e.g.
+/// when the reuse policy adopts a freshly authenticated dir into an account).
+#[cfg(target_os = "macos")]
+pub(crate) fn delete_keychain_credentials_for_dir(config_dir: Option<&str>) {
     let user = keychain_username();
-    let service_name = keychain_service_name();
+    let service_name = keychain_service_name_for(config_dir, oauth_file_suffix());
+    let _ = Command::new("security")
+        .args(["delete-generic-password", "-s", &service_name, "-a", &user])
+        .output();
+}
+
+#[cfg(target_os = "macos")]
+fn read_macos_keychain_credentials(account: &AccountConfig) -> Result<CredentialFile> {
+    let user = keychain_username();
+    let service_name = keychain_service_name_for(account.cli_config_dir(), oauth_file_suffix());
     let output = Command::new("security")
         .args([
             "find-generic-password",
@@ -429,17 +458,6 @@ fn keychain_username() -> String {
                 .filter(|value| !value.trim().is_empty())
         })
         .unwrap_or_else(|| "claude-code-user".to_string())
-}
-
-#[cfg(target_os = "macos")]
-fn keychain_service_name() -> String {
-    keychain_service_name_for(
-        std::env::var("CLAUDE_CONFIG_DIR")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .as_deref(),
-        oauth_file_suffix(),
-    )
 }
 
 #[cfg(target_os = "macos")]
@@ -503,12 +521,47 @@ fn parse_credential_json(contents: &str) -> Result<CredentialFile> {
     serde_json::from_str(contents).context("failed to parse Claude Code credentials")
 }
 
-async fn ensure_claude_code_auth() -> Result<()> {
-    let status = match claude_auth_status().await {
+/// Best-effort auth check used during `fetch`. Returns the signed-in email when
+/// available. A failed `claude auth status` call does not block usage fetching
+/// (returns `Ok(None)`), but an invalid login (wrong provider, no subscription)
+/// propagates as an error.
+async fn ensure_claude_code_auth(config_dir: Option<&str>) -> Result<Option<String>> {
+    let status = match claude_auth_status(config_dir).await {
         Ok(status) => status,
-        Err(_) => return Ok(()),
+        Err(_) => return Ok(None),
     };
-    validate_auth_status(&status)
+    validate_auth_status(&status)?;
+    Ok(status.email.clone())
+}
+
+/// Verify a freshly completed login for `config_dir`, returning the account
+/// email. Unlike [`ensure_claude_code_auth`], a failed status call is an error
+/// here because we are confirming a just-finished sign-in.
+pub(crate) async fn login_verify(config_dir: Option<&str>) -> Result<Option<String>> {
+    let status = claude_auth_status(config_dir).await?;
+    validate_auth_status(&status)?;
+    Ok(status.email.clone())
+}
+
+/// `claude auth login` argument vector. `--claudeai` selects the subscription
+/// (first-party) flow that usage tracking requires; `--email` pre-fills the
+/// login page when known.
+pub(crate) fn claude_login_args(email: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "auth".to_string(),
+        "login".to_string(),
+        "--claudeai".to_string(),
+    ];
+    if let Some(email) = email.map(str::trim).filter(|value| !value.is_empty()) {
+        args.push("--email".to_string());
+        args.push(email.to_string());
+    }
+    args
+}
+
+/// `claude auth logout` argument vector.
+pub(crate) fn claude_logout_args() -> Vec<String> {
+    vec!["auth".to_string(), "logout".to_string()]
 }
 
 fn validate_auth_status(status: &ClaudeAuthStatus) -> Result<()> {
@@ -544,21 +597,25 @@ fn validate_auth_status(status: &ClaudeAuthStatus) -> Result<()> {
     Ok(())
 }
 
-fn claude_binary() -> String {
+pub(crate) fn claude_binary() -> String {
     std::env::var("BURNRATE_CLAUDE_BIN")
         .or_else(|_| std::env::var("CLAUDE_BIN"))
         .unwrap_or_else(|_| "claude".to_string())
 }
 
-async fn claude_auth_status() -> Result<ClaudeAuthStatus> {
+async fn claude_auth_status(config_dir: Option<&str>) -> Result<ClaudeAuthStatus> {
     let binary = super::resolve_cli(&claude_binary());
+    let mut command = TokioCommand::new(&binary);
+    command
+        .args(["auth", "status", "--json"])
+        .env("PATH", super::augmented_path())
+        .stdin(std::process::Stdio::null());
+    if let Some(dir) = config_dir.filter(|value| !value.trim().is_empty()) {
+        command.env("CLAUDE_CONFIG_DIR", dir);
+    }
     let output = timeout(
         std::time::Duration::from_millis(AUTH_STATUS_TIMEOUT_MS),
-        TokioCommand::new(&binary)
-            .args(["auth", "status", "--json"])
-            .env("PATH", super::augmented_path())
-            .stdin(std::process::Stdio::null())
-            .output(),
+        command.output(),
     )
     .await
     .context("Claude Code auth status check timed out")?
@@ -663,6 +720,7 @@ fn parse_claude_oauth_usage(account: &AccountConfig, usage: ClaudeOAuthUsage) ->
         subscription,
         usage_buckets: buckets,
         quota,
+        email: usage.email,
         message: None,
         fetched_at: Utc::now(),
     }
@@ -801,6 +859,9 @@ mod tests {
             secret_storage: SecretStorageMode::Plaintext,
             keyring_account: None,
             plaintext_secret: None,
+            email: None,
+            config_dir: None,
+            order_index: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }
@@ -817,6 +878,7 @@ mod tests {
             auth_method: auth_method.map(ToString::to_string),
             api_provider: api_provider.map(ToString::to_string),
             subscription_type: subscription_type.map(ToString::to_string),
+            email: None,
         }
     }
 
@@ -958,6 +1020,27 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn keychain_service_name_isolates_per_account_dirs() {
+        // The default account (no per-account dir) keeps the legacy service name,
+        // so existing single-account installs read unchanged.
+        assert_eq!(
+            keychain_service_name_for(None, ""),
+            "Claude Code-credentials"
+        );
+        // Two managed accounts in distinct config dirs get distinct, stable
+        // service names — the basis for multi-account Keychain isolation.
+        let a = keychain_service_name_for(Some("/cfg/claude-code/acct-a"), "");
+        let b = keychain_service_name_for(Some("/cfg/claude-code/acct-b"), "");
+        assert_ne!(a, b);
+        assert_ne!(a, "Claude Code-credentials");
+        assert_eq!(
+            a,
+            keychain_service_name_for(Some("/cfg/claude-code/acct-a"), "")
+        );
+    }
+
     #[test]
     fn maps_claude_oauth_usage_buckets_and_max_plan() {
         let snapshot = parse_claude_oauth_usage(
@@ -965,6 +1048,7 @@ mod tests {
             ClaudeOAuthUsage {
                 subscription_type: Some("max".to_string()),
                 rate_limit_tier: Some("default_claude_max_20x".to_string()),
+                email: Some("dev@example.com".to_string()),
                 usage: serde_json::from_value(json!({
                     "five_hour": {
                         "utilization": 96,
@@ -1002,6 +1086,42 @@ mod tests {
         assert_eq!(snapshot.usage_buckets[2].label, "Weekly OAuth Apps");
         assert_eq!(snapshot.usage_buckets[3].label, "Weekly Sonnet");
         assert_eq!(snapshot.usage_buckets[4].label, "Extra usage");
+        assert_eq!(snapshot.email.as_deref(), Some("dev@example.com"));
+    }
+
+    #[test]
+    fn claude_auth_status_parses_email_and_subscription() {
+        let status: ClaudeAuthStatus = serde_json::from_str(
+            r#"{
+                "loggedIn": true,
+                "authMethod": "claude.ai",
+                "apiProvider": "firstParty",
+                "email": "dev.urandom.io@gmail.com",
+                "orgName": "dev.urandom.io@gmail.com's Organization",
+                "subscriptionType": "max"
+            }"#,
+        )
+        .unwrap();
+
+        assert!(status.logged_in);
+        assert_eq!(status.email.as_deref(), Some("dev.urandom.io@gmail.com"));
+        assert_eq!(status.subscription_type.as_deref(), Some("max"));
+        validate_auth_status(&status).unwrap();
+    }
+
+    #[test]
+    fn claude_login_args_select_subscription_flow() {
+        assert_eq!(claude_login_args(None), vec!["auth", "login", "--claudeai"]);
+        assert_eq!(
+            claude_login_args(Some("a@b.com")),
+            vec!["auth", "login", "--claudeai", "--email", "a@b.com"]
+        );
+        // Blank emails are ignored.
+        assert_eq!(
+            claude_login_args(Some("   ")),
+            vec!["auth", "login", "--claudeai"]
+        );
+        assert_eq!(claude_logout_args(), vec!["auth", "logout"]);
     }
 
     #[tokio::test]

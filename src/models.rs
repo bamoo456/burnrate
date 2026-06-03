@@ -56,8 +56,26 @@ pub(crate) struct AccountConfig {
     pub secret_storage: SecretStorageMode,
     pub keyring_account: Option<String>,
     pub plaintext_secret: Option<String>,
+    /// Email address associated with the signed-in account, when known.
+    #[serde(default)]
+    pub email: Option<String>,
+    /// Per-account CLI home (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`). `None` means the
+    /// system default location (`~/.claude` / `~/.codex`).
+    #[serde(default)]
+    pub config_dir: Option<String>,
+    /// Global display order; lower sorts first. `None` is legacy/unset and sorts
+    /// after explicitly ordered accounts.
+    #[serde(default)]
+    pub order_index: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+impl AccountConfig {
+    /// The per-account CLI home, or `None` for the system-default account.
+    pub(crate) fn cli_config_dir(&self) -> Option<&str> {
+        self.config_dir.as_deref()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -84,6 +102,10 @@ pub(crate) struct AccountView {
     pub endpoint_override: Option<String>,
     pub secret_storage: SecretStorageMode,
     pub has_secret: bool,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub config_dir: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -95,6 +117,8 @@ pub(crate) struct UsageSnapshot {
     pub provider: ProviderKind,
     pub label: String,
     pub status: SnapshotStatus,
+    #[serde(default)]
+    pub email: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subscription: Option<SubscriptionSnapshot>,
     #[serde(default)]
@@ -158,6 +182,22 @@ pub(crate) struct QuotaSnapshot {
     pub remaining: Option<f64>,
     pub unit: String,
     pub reset_at: Option<DateTime<Utc>>,
+}
+
+/// Emitted as `burnrate-login-complete` when an interactive sign-in succeeds.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LoginComplete {
+    pub id: String,
+    pub account: AccountView,
+}
+
+/// Emitted as `burnrate-login-failed` when a sign-in errors or is cancelled.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LoginFailed {
+    pub id: String,
+    pub error: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
