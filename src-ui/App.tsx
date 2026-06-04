@@ -48,6 +48,10 @@ import type {
 } from "./types";
 import { useLogin } from "./useLogin";
 
+const TRAY_BASE_WIDTH = 360;
+const TRAY_MIN_SCALE = 0.5;
+const TRAY_MAX_SCALE = 1;
+
 export function App() {
   const isTrayView =
     new URLSearchParams(window.location.search).get("view") === "tray";
@@ -64,7 +68,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [appVersion, setAppVersion] = useState("");
   const lastPreferenceSize = useRef({ width: 0, height: 0 });
-  const lastTrayHeight = useRef(0);
+  const lastTraySize = useRef({ width: 0, height: 0 });
 
   const updateChannel: UpdateChannel =
     state?.settings?.updateChannel ?? "stable";
@@ -165,20 +169,14 @@ export function App() {
     () => summaryFromBackend(state?.traySummary, snapshots),
     [state?.traySummary, snapshots],
   );
-  const settings: AppSettings = state?.settings ?? {
-    hideFromDock: true,
-    updateChannel: "stable",
+  const settings: AppSettings = {
+    hideFromDock: state?.settings?.hideFromDock ?? true,
+    updateChannel: state?.settings?.updateChannel ?? "stable",
+    trayScale: state?.settings?.trayScale ?? TRAY_MAX_SCALE,
   };
 
-  async function onUpdateChannelChange(channel: UpdateChannel) {
+  async function updateSettings(next: AppSettings) {
     const previousSettings = settings;
-    if (channel === previousSettings.updateChannel) {
-      return;
-    }
-    // Optimistically reflect the choice; persist, then let the backend's
-    // settings-updated event reconcile both windows. Roll back if the save
-    // fails so the UI doesn't drift from the stored config.
-    const next: AppSettings = { ...previousSettings, updateChannel: channel };
     setState((previous) =>
       previous ? { ...previous, settings: next } : previous,
     );
@@ -190,6 +188,28 @@ export function App() {
       );
       setError(String(err));
     }
+  }
+
+  async function onUpdateChannelChange(channel: UpdateChannel) {
+    const previousSettings = settings;
+    if (channel === previousSettings.updateChannel) {
+      return;
+    }
+    // Optimistically reflect the choice; persist, then let the backend's
+    // settings-updated event reconcile both windows. Roll back if the save
+    // fails so the UI doesn't drift from the stored config.
+    await updateSettings({ ...previousSettings, updateChannel: channel });
+  }
+
+  async function onTrayScaleChange(trayScale: number) {
+    const nextScale = Math.max(
+      TRAY_MIN_SCALE,
+      Math.min(TRAY_MAX_SCALE, trayScale),
+    );
+    if (Math.abs(nextScale - settings.trayScale) < 0.001) {
+      return;
+    }
+    await updateSettings({ ...settings, trayScale: nextScale });
   }
 
   useEffect(() => {
@@ -325,33 +345,59 @@ export function App() {
       return;
     }
     const panel = document.querySelector<HTMLElement>(".tray-panel");
-    if (!panel) {
+    const scroll = document.querySelector<HTMLElement>(".tray-scroll");
+    if (!panel || !scroll) {
       return;
     }
 
     let frame = 0;
+    let resizeObserver: ResizeObserver | null = null;
+    let fontReadyCancelled = false;
     const measure = () => {
       const px = (value: string) => Number.parseFloat(value) || 0;
       const style = window.getComputedStyle(panel);
       const paddingY = px(style.paddingTop) + px(style.paddingBottom);
       const rowGap = px(style.rowGap || style.gap);
-      // Only height is reported: the tray width is pinned to the design width by
-      // the backend. Sum the intrinsic height of each child rather than reading
-      // panel.scrollHeight, which is pinned by `min-height: 100vh` and would
-      // never let the window shrink.
-      const children = Array.from(panel.children) as HTMLElement[];
-      const contentHeight =
-        children.reduce((sum, child) => sum + child.offsetHeight, 0) +
-        rowGap * Math.max(0, children.length - 1);
-      const height = Math.ceil(contentHeight + paddingY);
-      if (height <= 0) {
+      const header = panel.querySelector<HTMLElement>(".tray-header");
+      const notice = panel.querySelector<HTMLElement>(".tray-notice");
+      // The panel and scroll region are fixed to the native window height.
+      // Measure the scroll region's children rather than scroll.scrollHeight so
+      // a flexed viewport can still shrink when there is little content.
+      const scrollStyle = window.getComputedStyle(scroll);
+      const scrollGap = px(scrollStyle.rowGap || scrollStyle.gap);
+      const scrollChildren = Array.from(scroll.children) as HTMLElement[];
+      const scrollContentHeight =
+        scrollChildren.reduce((sum, child) => sum + child.offsetHeight, 0) +
+        scrollGap * Math.max(0, scrollChildren.length - 1);
+      const visibleRows = [header, notice, scroll].filter(Boolean).length;
+      const height = Math.ceil(
+        paddingY +
+          (header?.offsetHeight ?? 0) +
+          (notice?.offsetHeight ?? 0) +
+          scrollContentHeight +
+          rowGap * Math.max(0, visibleRows - 1),
+      );
+      const scale = Math.max(
+        TRAY_MIN_SCALE,
+        Math.min(TRAY_MAX_SCALE, settings.trayScale),
+      );
+      panel.style.setProperty("--tray-scale", scale.toFixed(3));
+      const scaledHeight = Math.ceil(height * scale);
+      // Keep the tray at the native menu-sized width. Height is adaptive and the
+      // internal list scrolls when scaled content exceeds the comfort cap.
+      const width = TRAY_BASE_WIDTH;
+      if (scaledHeight <= 0 || width <= 0) {
         return;
       }
-      if (Math.abs(height - lastTrayHeight.current) <= 1) {
+      const last = lastTraySize.current;
+      if (
+        Math.abs(width - last.width) <= 1 &&
+        Math.abs(scaledHeight - last.height) <= 1
+      ) {
         return;
       }
-      lastTrayHeight.current = height;
-      void resizeTrayToContent(height);
+      lastTraySize.current = { width, height: scaledHeight };
+      void resizeTrayToContent({ width, height: scaledHeight });
     };
     const scheduleMeasure = () => {
       cancelAnimationFrame(frame);
@@ -360,10 +406,35 @@ export function App() {
 
     scheduleMeasure();
 
+    if ("ResizeObserver" in window) {
+      resizeObserver = new ResizeObserver(scheduleMeasure);
+      resizeObserver.observe(panel);
+      resizeObserver.observe(scroll);
+      for (const child of Array.from(scroll.children)) {
+        resizeObserver.observe(child);
+      }
+    }
+
+    void document.fonts?.ready.then(() => {
+      if (!fontReadyCancelled) {
+        scheduleMeasure();
+      }
+    });
+
     return () => {
+      fontReadyCancelled = true;
       cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
     };
-  }, [isTrayView, snapshots, error, busy, accounts.length, summary.label]);
+  }, [
+    isTrayView,
+    snapshots,
+    error,
+    busy,
+    accounts,
+    summary.label,
+    settings.trayScale,
+  ]);
 
   async function onSubmit(event: FormEvent) {
     event.preventDefault();
@@ -572,6 +643,10 @@ export function App() {
         onManualAdd={manualAdd}
         onLogout={(id) => void onLogout(id)}
         onReorderAccounts={(ids) => void onReorderAccounts(ids)}
+        settings={{
+          trayScale: settings.trayScale,
+          onTrayScaleChange: (scale) => void onTrayScaleChange(scale),
+        }}
         updates={{
           channel: settings.updateChannel,
           state: updater.state,

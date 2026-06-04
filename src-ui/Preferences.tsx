@@ -56,6 +56,11 @@ export interface UpdatesPanelProps {
   onDismiss: () => void;
 }
 
+export interface TraySettingsPanelProps {
+  trayScale: number;
+  onTrayScaleChange: (scale: number) => void;
+}
+
 // Re-exported for existing importers (App.tsx). Source of truth: ./constants.
 export {
   OPENROUTER_DEFAULT_ENDPOINT,
@@ -102,6 +107,7 @@ export function Preferences({
   onManualAdd,
   onLogout,
   onReorderAccounts,
+  settings,
   updates,
 }: {
   accounts: AccountView[];
@@ -122,6 +128,7 @@ export function Preferences({
   onManualAdd: (provider: ProviderKind) => void;
   onLogout: (id: string) => void;
   onReorderAccounts: (orderedIds: string[]) => void;
+  settings: TraySettingsPanelProps;
   updates: UpdatesPanelProps;
 }) {
   const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -245,10 +252,42 @@ export function Preferences({
             onLogout={onLogout}
           />
 
+          <TraySettings {...settings} />
+
           <UpdatesSettings {...updates} />
         </section>
       </section>
     </main>
+  );
+}
+
+function TraySettings({
+  trayScale,
+  onTrayScaleChange,
+}: TraySettingsPanelProps) {
+  const percent = Math.round(trayScale * 100);
+  return (
+    <section className="prefs-tray-settings" aria-label="Tray popover">
+      <SectionTitle title="Tray popover" detail="Sizing" />
+      <label className="settings-slider">
+        <span>
+          <strong>Tray content scale</strong>
+          <small>
+            {percent === 100
+              ? "Native size — scaling disabled"
+              : `${percent}% — scales down before showing an internal scrollbar`}
+          </small>
+        </span>
+        <input
+          type="range"
+          min="0.5"
+          max="1"
+          step="0.05"
+          value={trayScale}
+          onChange={(event) => onTrayScaleChange(Number(event.target.value))}
+        />
+      </label>
+    </section>
   );
 }
 
