@@ -408,10 +408,20 @@ pub(crate) fn delete_keychain_credentials(account: &AccountConfig) {
 /// Like [`delete_keychain_credentials`] but keyed directly by a config dir, for
 /// clearing the credential of a *stale* dir that is about to be discarded (e.g.
 /// when the reuse policy adopts a freshly authenticated dir into an account).
+///
+/// Fails closed: a `None`/empty/unmanaged dir derives the *system-default*
+/// service name (`Claude Code-credentials`) — the user's terminal session —
+/// which Burnrate never creates and must never delete, so such calls are no-ops.
 #[cfg(target_os = "macos")]
 pub(crate) fn delete_keychain_credentials_for_dir(config_dir: Option<&str>) {
+    let Some(dir) = config_dir.filter(|dir| !dir.trim().is_empty()) else {
+        return;
+    };
+    if !crate::config::is_managed_cli_dir(std::path::Path::new(dir)) {
+        return;
+    }
     let user = keychain_username();
-    let service_name = keychain_service_name_for(config_dir, oauth_file_suffix());
+    let service_name = keychain_service_name_for(Some(dir), oauth_file_suffix());
     let _ = Command::new("security")
         .args(["delete-generic-password", "-s", &service_name, "-a", &user])
         .output();
@@ -666,6 +676,10 @@ async fn claude_auth_status(config_dir: Option<&str>) -> Result<ClaudeAuthStatus
         .args(["auth", "status", "--json"])
         .env("PATH", super::augmented_path())
         .stdin(std::process::Stdio::null());
+    // An inherited CLAUDE_CODE_OAUTH_TOKEN/ANTHROPIC_API_KEY would make the CLI
+    // report env auth (loggedIn with no subscription/email) instead of the
+    // account's own credential store.
+    super::strip_credential_env(&mut command);
     if let Some(dir) = config_dir.filter(|value| !value.trim().is_empty()) {
         command.env("CLAUDE_CONFIG_DIR", dir);
     }
@@ -873,10 +887,12 @@ fn claude_code_user_agent() -> String {
 }
 
 fn detect_claude_code_user_agent() -> String {
-    let output = Command::new(super::resolve_cli(&claude_binary()))
+    let mut command = Command::new(super::resolve_cli(&claude_binary()));
+    command
         .arg("--version")
-        .env("PATH", super::augmented_path())
-        .output();
+        .env("PATH", super::augmented_path());
+    super::strip_credential_env_std(&mut command);
+    let output = command.output();
     match output {
         Ok(output) if output.status.success() => {
             let raw = String::from_utf8_lossy(&output.stdout);

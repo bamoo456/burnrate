@@ -233,6 +233,9 @@ pub(crate) async fn run_logout(provider: ProviderKind, config_dir: Option<&str>)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .kill_on_drop(true);
+    // Inherited token env vars would make the CLI sign out the wrong session
+    // (or believe it is signed in via env auth).
+    super::strip_credential_env(&mut command);
     if let Some(dir) = config_dir.map(str::trim).filter(|dir| !dir.is_empty()) {
         command.env(env_key, dir);
     }
@@ -267,6 +270,10 @@ async fn run_login_inner(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
+    // An inherited CLAUDE_CODE_OAUTH_TOKEN/OPENAI_API_KEY would make the CLI
+    // treat itself as already authenticated via env and skip the real browser
+    // flow, so the sign-in writes nothing to the account's credential store.
+    super::strip_credential_env(&mut command);
     // `None` means the system-default location (e.g. re-authenticating the
     // auto-detected account refreshes `~/.claude` / `~/.codex` directly).
     if let Some(dir) = config_dir.filter(|dir| !dir.trim().is_empty()) {

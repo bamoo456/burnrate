@@ -1,4 +1,9 @@
-use std::{fs, path::Path, sync::Mutex};
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+    sync::Mutex,
+};
 
 use anyhow::{Result, anyhow};
 use chrono::Utc;
@@ -32,6 +37,14 @@ impl AppState {
         let config_store = ConfigStore::open()?;
         let mut config = config_store.load_config()?;
         let detected_changed = config.merge_detected(providers::detect_accounts());
+        // Skip orphan GC when the database was just created (first launch, a
+        // deleted `burnrate.sqlite`, a partial backup restore, or a recovered
+        // malformed legacy config): an empty/fresh account list would classify
+        // every managed dir — including live secondary-account credentials — as
+        // orphaned. Collection resumes on the next launch with an established DB.
+        if !config_store.created_database() {
+            gc_orphaned_cli_dirs(&config);
+        }
         if detected_changed {
             config_store.save_config(&config)?;
         }
@@ -241,6 +254,18 @@ impl AppState {
                         .cloned()
                         .ok_or_else(|| anyhow!("account no longer exists"))?
                 };
+                // Fail closed: a browser re-auth without an isolated CLI dir would
+                // run `claude auth login` / `codex login` against the system default
+                // (`~/.claude` / `~/.codex`) and clobber the user's terminal session.
+                // The auto-detected account is the *intended* system-default target;
+                // any other account (e.g. one added via manual token entry) must have
+                // its own managed dir first.
+                if account.config_dir.is_none() && !account.auto_detected {
+                    return Err(anyhow!(
+                        "This account has no isolated CLI home, so a browser sign-in would overwrite your system-default {} session. Remove it and add it again via browser sign-in to get an isolated home.",
+                        provider.display_name()
+                    ));
+                }
                 self.login_manager
                     .reserve(&account.id, true, input_tx.clone())?;
                 let view = match self.account_view(&account.id) {
@@ -449,7 +474,17 @@ impl AppState {
             });
 
             let final_id = if let Some(existing_id) = existing_id {
-                let pending_dir = config.remove(id).and_then(|account| account.config_dir);
+                // The placeholder vanishing mid-flight (the user removed it while
+                // the browser flow was open) aborts the merge: adopting or
+                // discarding state for an account that no longer exists would at
+                // best corrupt the existing account's dir binding — and a `None`
+                // pending dir would key the *system-default* Keychain credential.
+                // `update_config` rolls back on error; any dir the CLI re-created
+                // on disk is collected by the next startup GC.
+                let pending = config.remove(id).ok_or_else(|| {
+                    anyhow!("sign-in discarded because the account was removed during login")
+                })?;
+                let pending_dir = pending.config_dir;
                 if let Some(existing) = config
                     .accounts
                     .iter_mut()
@@ -472,14 +507,24 @@ impl AppState {
                         }
                         cleanup_dirs.push(stale);
                     } else {
-                        // The match is the system-default account; keep its creds and
-                        // discard the throwaway login dir.
+                        // The match is the system-default account: keep its creds and
+                        // fully discard the throwaway login dir AND its macOS Keychain
+                        // credential (keyed by the dir), which would otherwise be
+                        // orphaned and accumulate on every same-account sign-in.
+                        #[cfg(target_os = "macos")]
+                        if provider == ProviderKind::ClaudeCode {
+                            delete_keychain_dirs.push(pending_dir.clone());
+                        }
                         cleanup_dirs.push(pending_dir);
                     }
                     existing.email = email;
                     existing.enabled = true;
                     existing.updated_at = Utc::now();
                 } else {
+                    #[cfg(target_os = "macos")]
+                    if provider == ProviderKind::ClaudeCode {
+                        delete_keychain_dirs.push(pending_dir.clone());
+                    }
                     cleanup_dirs.push(pending_dir);
                 }
                 existing_id
@@ -517,6 +562,12 @@ impl AppState {
         if result.is_ok()
             && let Some(removed) = removed
         {
+            // A failed Claude sign-in may have written a Keychain entry (keyed by
+            // the now-discarded dir) before erroring; drop it so it is not orphaned.
+            #[cfg(target_os = "macos")]
+            if removed.provider == ProviderKind::ClaudeCode {
+                login::delete_claude_keychain(&removed);
+            }
             cleanup_managed_dir(removed.config_dir.as_deref());
             let _ = key_store::remove_secret(&removed);
         }
@@ -602,6 +653,47 @@ impl AppState {
 
 fn provider_supports_login(provider: ProviderKind) -> bool {
     matches!(provider, ProviderKind::ClaudeCode | ProviderKind::Codex)
+}
+
+/// Remove managed CLI dirs under `<config_dir>/cli/<provider>/*` that no account
+/// references — leftovers from interrupted, discarded, or merged sign-ins (these
+/// would otherwise accumulate, and a stale Claude dir keeps an orphaned Keychain
+/// credential). Guarded by `is_managed_cli_dir`, so the system defaults
+/// (`~/.claude` / `~/.codex`) can never be touched.
+fn gc_orphaned_cli_dirs(config: &AppConfig) {
+    // Compare both the recorded spelling and the canonicalized path: the
+    // persisted `config_dir` strings may differ from this run's scan through a
+    // symlink (`/var` vs `/private/var`) or a respelled `BURNRATE_CONFIG_DIR`,
+    // and a false "unreferenced" verdict here deletes live credentials.
+    let mut referenced: HashSet<PathBuf> = HashSet::new();
+    for dir in config
+        .accounts
+        .iter()
+        .filter_map(|account| account.config_dir.as_deref())
+    {
+        if let Ok(canonical) = fs::canonicalize(dir) {
+            referenced.insert(canonical);
+        }
+        referenced.insert(PathBuf::from(dir));
+    }
+    for dir in config::existing_managed_cli_dirs() {
+        let canonical = fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
+        if referenced.contains(&dir)
+            || referenced.contains(&canonical)
+            || !config::is_managed_cli_dir(&dir)
+        {
+            continue;
+        }
+        #[cfg(target_os = "macos")]
+        if dir
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .is_some_and(|name| name == ProviderKind::ClaudeCode.as_str())
+        {
+            login::delete_claude_keychain_for_dir(Some(dir.to_string_lossy().as_ref()));
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
 }
 
 /// Remove a per-account CLI dir, but only if it is one Burnrate manages — never a

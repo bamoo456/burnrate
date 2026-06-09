@@ -119,7 +119,10 @@ impl AppConfig {
             account.aws_region = input.aws_region;
             account.aws_monthly_budget_usd = input.aws_monthly_budget_usd;
             account.aws_categories = input.aws_categories;
-            account.auto_detected = false;
+            // Keep `auto_detected`: editing metadata does not change where the
+            // account's credentials live, and clearing it would make the re-auth
+            // guard treat the genuine system-default account as unsafe to sign
+            // in (`merge_detected` would only restore the flag at next launch).
             account.updated_at = now;
             return account.clone();
         }
@@ -397,6 +400,47 @@ pub(crate) fn is_managed_cli_dir(path: &Path) -> bool {
     path.starts_with(&cli_root) && path != cli_root
 }
 
+/// Every per-account CLI dir currently present on disk under the managed
+/// `<config_dir>/cli/<provider>/*` tree. Used by startup orphan GC to find dirs
+/// that no account references anymore.
+pub(crate) fn existing_managed_cli_dirs() -> Vec<PathBuf> {
+    match config_dir() {
+        Ok(root) => managed_cli_dirs_under(&root.join("cli")),
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Pure scan of the `cli/<provider>/<account>` leaf dirs under `cli_root`,
+/// separated from [`config_dir`] so it is testable against a temp tree. A missing
+/// tree or unreadable entries yield an empty list rather than an error (GC is
+/// best-effort and must never fail startup). Only dirs under a provider name
+/// Burnrate actually creates (browser-login providers) are reported — anything
+/// else under `cli/` was not made by Burnrate and is never a deletion candidate.
+fn managed_cli_dirs_under(cli_root: &Path) -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let Ok(providers) = fs::read_dir(cli_root) else {
+        return dirs;
+    };
+    for provider in providers.flatten() {
+        let known_provider = [ProviderKind::ClaudeCode, ProviderKind::Codex]
+            .iter()
+            .any(|kind| provider.file_name() == kind.as_str());
+        if !known_provider {
+            continue;
+        }
+        let Ok(accounts) = fs::read_dir(provider.path()) else {
+            continue;
+        };
+        for account in accounts.flatten() {
+            let path = account.path();
+            if path.is_dir() {
+                dirs.push(path);
+            }
+        }
+    }
+    dirs
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::tempdir;
@@ -613,6 +657,37 @@ mod tests {
     }
 
     #[test]
+    fn upsert_preserves_auto_detected_on_edit() {
+        let mut config = AppConfig::default();
+        config.accounts.push(default_auto_account(
+            "claude-code-local",
+            ProviderKind::ClaudeCode,
+            "Claude Code",
+            PathBuf::from("/home/user/.claude"),
+        ));
+
+        config.upsert_manual(AccountInput {
+            id: Some("claude-code-local".to_string()),
+            provider: ProviderKind::ClaudeCode,
+            label: "Renamed".to_string(),
+            enabled: true,
+            endpoint_override: None,
+            secret_storage: SecretStorageMode::Keyring,
+            secret: None,
+            aws_profile: None,
+            aws_region: None,
+            aws_monthly_budget_usd: None,
+            aws_categories: Vec::new(),
+        });
+
+        // Editing metadata must not strip detection provenance: the re-auth
+        // guard relies on `auto_detected` to allow an in-place sign-in for the
+        // system-default account (config_dir None).
+        assert!(config.accounts[0].auto_detected);
+        assert_eq!(config.accounts[0].label, "Renamed");
+    }
+
+    #[test]
     fn remove_returns_removed_account() {
         let mut config = AppConfig::default();
         config.upsert_manual(AccountInput {
@@ -795,5 +870,29 @@ mod tests {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("/tmp"));
         assert!(!is_managed_cli_dir(&home.join(".claude")));
         assert!(!is_managed_cli_dir(&home.join(".codex")));
+    }
+
+    #[test]
+    fn managed_cli_dirs_under_lists_account_leaves() {
+        let dir = tempdir().unwrap();
+        let cli_root = dir.path().join("cli");
+        let claude = cli_root.join("claude-code").join("acct-a");
+        let codex = cli_root.join("codex").join("acct-b");
+        fs::create_dir_all(&claude).unwrap();
+        fs::create_dir_all(&codex).unwrap();
+        // A stray file under a provider dir is not an account leaf and is ignored.
+        fs::write(cli_root.join("codex").join("stray.txt"), "x").unwrap();
+        // Dirs under a provider name Burnrate never creates are not deletion
+        // candidates, even though they sit two levels under cli/.
+        fs::create_dir_all(cli_root.join("not-a-provider").join("acct-c")).unwrap();
+
+        let mut found = managed_cli_dirs_under(&cli_root);
+        found.sort();
+        let mut expected = vec![claude, codex];
+        expected.sort();
+        assert_eq!(found, expected);
+
+        // A missing tree yields an empty list rather than an error.
+        assert!(managed_cli_dirs_under(&dir.path().join("absent")).is_empty());
     }
 }
