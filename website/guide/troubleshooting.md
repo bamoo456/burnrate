@@ -35,6 +35,53 @@ CARGO_TARGET_AARCH64_APPLE_DARWIN_LINKER=/usr/bin/cc cargo install burnrate
 plain registry installs. The native bundles and `nix run` are unaffected
 either way.
 
+## `cargo install` fails: `unrecognized command-line option` (GCC as `cc`)
+
+**macOS.** Same root cause as the `-liconv` failure above — a non-Apple
+`cc` first in `PATH` (a Nix or Homebrew GCC) — but hitting the **compile**
+step instead of the link step, so the linker pin alone doesn't cover it:
+
+```
+gcc: error: unrecognized command-line option '-mmacos-version-min=11.0';
+did you mean '-mmacosx-version-min='?
+error: failed to run custom build command for `mac-notification-sys`
+```
+
+Build scripts that compile C/Objective-C through the Rust `cc` crate
+(Burnrate's macOS notification dependency `mac-notification-sys`, among
+others in the wider ecosystem) pass clang-only flags such as
+`-mmacos-version-min`; GNU GCC only knows the `-mmacosx-version-min=`
+spelling and aborts.
+
+The `cc` crate honors compiler overrides from the environment. Permanent —
+add to `~/.cargo/config.toml`, alongside the linker pins from the section
+above:
+
+```toml
+[env]
+CC_aarch64_apple_darwin = "/usr/bin/cc"
+CC_x86_64_apple_darwin = "/usr/bin/cc"
+CXX_aarch64_apple_darwin = "/usr/bin/c++"
+CXX_x86_64_apple_darwin = "/usr/bin/c++"
+```
+
+By default, `[env]` values don't override variables already set in your
+real environment (only entries marked `force = true` do), so Nix dev
+shells that export their own `CC` keep working.
+
+Or as a one-off:
+
+```sh
+CC=/usr/bin/cc CXX=/usr/bin/c++ cargo install burnrate
+```
+
+Unlike the linker pin, Burnrate deliberately does **not** ship this inside
+the crate's packaged config: the `cc` crate prefers `CC_<target>` over a
+plain `CC`, so a packaged pin would shadow the `CC` that Nix's sandboxed
+package build exports and point it at `/usr/bin/cc`, which doesn't exist
+inside the sandbox. This one belongs in user config, where your real
+environment always wins.
+
 ## Keychain re-prompts on every launch
 
 **macOS.** The keychain binds an "Always Allow" grant to the requesting
@@ -99,6 +146,7 @@ burnrate debug env       # credential-override env vars + resolved provider CLIs
 burnrate debug detect    # run provider auto-detection (read-only)
 burnrate debug load      # full startup load: detect + merge + orphan GC
 burnrate debug snapshot  # fetch a usage snapshot for every enabled account
+burnrate debug insights  # collect claudex-backed local usage for local providers
 ```
 
 Each subcommand prints JSON, so it's easy to see exactly what the app would
