@@ -6,6 +6,8 @@ import type {
   AccountView,
   AppSettings,
   DashboardState,
+  LocalDailyUsage,
+  LocalUsageReport,
   LoginComplete,
   LoginFailed,
   LoginProgress,
@@ -106,12 +108,30 @@ let mockAccounts: AccountView[] = [
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   },
+  {
+    id: "copilot-local",
+    provider: "copilot",
+    label: "GitHub Copilot",
+    enabled: true,
+    autoDetected: true,
+    credentialPath: "~/.copilot/session-state",
+    endpointOverride: null,
+    secretStorage: "keyring",
+    hasSecret: false,
+    email: null,
+    configDir: null,
+    copilotPlan: "pro",
+    copilotCustomLimit: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  },
 ];
 
 let mockSettings: AppSettings = {
   hideFromDock: true,
   updateChannel: "stable",
   trayScale: 1,
+  localInsights: true,
 };
 
 const mockSnapshots: UsageSnapshot[] = [
@@ -291,6 +311,41 @@ const mockSnapshots: UsageSnapshot[] = [
     fetchedAt: new Date().toISOString(),
   },
   {
+    accountId: "copilot-local",
+    provider: "copilot",
+    label: "GitHub Copilot",
+    status: "healthy",
+    subscription: {
+      plan: "pro",
+      planLabel: "Pro",
+      rateLimitTier: null,
+      extraUsageEnabled: null,
+      source: "copilot-local-estimate",
+    },
+    usageBuckets: [
+      {
+        id: "copilot-premium-mtd",
+        label: "Premium requests",
+        window: "monthly",
+        used: 142,
+        limit: 300,
+        remaining: 158,
+        unit: "requests",
+        resetAt: new Date(Date.now() + 19 * 24 * 60 * 60 * 1000).toISOString(),
+        status: "healthy",
+      },
+    ],
+    quota: {
+      used: 142,
+      limit: 300,
+      remaining: 158,
+      unit: "requests",
+      resetAt: new Date(Date.now() + 19 * 24 * 60 * 60 * 1000).toISOString(),
+    },
+    message: "Local estimate — counts Copilot CLI sessions on this Mac only.",
+    fetchedAt: new Date().toISOString(),
+  },
+  {
     accountId: "runpod-main",
     provider: "runpod",
     label: "Runpod",
@@ -343,6 +398,105 @@ const mockSnapshots: UsageSnapshot[] = [
   },
 ];
 
+/** 14 days of plausible daily cost data ending today, for dev:web/tests. */
+function mockDailySeries(scale: number): LocalDailyUsage[] {
+  const days: LocalDailyUsage[] = [];
+  for (let i = 13; i >= 0; i -= 1) {
+    const date = new Date(Date.now() - i * 24 * 60 * 60 * 1000);
+    // Deterministic-ish wave so the sparkline has a readable shape.
+    const wave = 0.5 + 0.5 * Math.sin((13 - i) * 1.1);
+    days.push({
+      date: date.toISOString().slice(0, 10),
+      costUsd: Number((scale * (0.3 + wave)).toFixed(2)),
+      sessions: Math.max(1, Math.round(wave * 6)),
+    });
+  }
+  return days;
+}
+
+function mockLocalUsageReport(): LocalUsageReport {
+  const claudeDaily = mockDailySeries(8);
+  const codexDaily = mockDailySeries(0.6);
+  const copilotDaily = mockDailySeries(0.2);
+  const monthCost = (daily: LocalDailyUsage[]) =>
+    Number(daily.reduce((sum, day) => sum + day.costUsd, 0).toFixed(2));
+  return {
+    available: true,
+    message: null,
+    generatedAt: new Date().toISOString(),
+    providers: [
+      {
+        provider: "claude-code",
+        todayCostUsd: claudeDaily[claudeDaily.length - 1].costUsd,
+        todaySessions: claudeDaily[claudeDaily.length - 1].sessions,
+        weekCostUsd: monthCost(claudeDaily.slice(-7)),
+        monthCostUsd: monthCost(claudeDaily),
+        projectedMonthCostUsd: monthCost(claudeDaily) * 2.1,
+        monthInputTokens: 48_200_000,
+        monthOutputTokens: 1_350_000,
+        topModel: "claude-fable-5",
+        modelDistribution: [
+          { model: "claude-fable-5", sessions: 41, costUsd: 61.4 },
+          { model: "claude-opus-4-8", sessions: 12, costUsd: 18.2 },
+          { model: "claude-haiku-4-5", sessions: 30, costUsd: 2.1 },
+        ],
+        topProjects: [
+          { project: "burnrate", sessions: 22, costUsd: 31.0 },
+          { project: "claudex", sessions: 14, costUsd: 19.5 },
+          { project: "dotfiles", sessions: 6, costUsd: 4.2 },
+        ],
+        daily: claudeDaily,
+      },
+      {
+        provider: "codex",
+        todayCostUsd: codexDaily[codexDaily.length - 1].costUsd,
+        todaySessions: codexDaily[codexDaily.length - 1].sessions,
+        weekCostUsd: monthCost(codexDaily.slice(-7)),
+        monthCostUsd: monthCost(codexDaily),
+        projectedMonthCostUsd: monthCost(codexDaily) * 2.1,
+        monthInputTokens: 3_900_000,
+        monthOutputTokens: 410_000,
+        topModel: "gpt-5.4",
+        modelDistribution: [{ model: "gpt-5.4", sessions: 18, costUsd: 6.8 }],
+        topProjects: [{ project: "burnrate", sessions: 9, costUsd: 3.9 }],
+        daily: codexDaily,
+      },
+      {
+        provider: "copilot",
+        todayCostUsd: copilotDaily[copilotDaily.length - 1].costUsd,
+        todaySessions: copilotDaily[copilotDaily.length - 1].sessions,
+        weekCostUsd: monthCost(copilotDaily.slice(-7)),
+        monthCostUsd: monthCost(copilotDaily),
+        projectedMonthCostUsd: monthCost(copilotDaily) * 2.1,
+        monthInputTokens: 820_000,
+        monthOutputTokens: 95_000,
+        topModel: "gpt-5",
+        modelDistribution: [{ model: "gpt-5", sessions: 11, costUsd: 1.9 }],
+        topProjects: [{ project: "burnrate", sessions: 7, costUsd: 1.4 }],
+        daily: copilotDaily,
+      },
+    ],
+  };
+}
+
+/** Pull the claudex-backed local usage report. Cheap when fresh (the backend
+ *  caches and the index self-throttles); the first call on a machine may take
+ *  a while, which is why the UI treats this as hydration, not blocking data. */
+export async function localUsage(): Promise<LocalUsageReport> {
+  /* v8 ignore next 3: native Tauri invoke path */
+  if (isTauri) {
+    return invoke<LocalUsageReport>("local_usage");
+  }
+  return mockLocalUsageReport();
+}
+
+/** Subscribe to the backend's post-refresh insights broadcast. */
+export async function onLocalUsageUpdated(
+  handler: (report: LocalUsageReport) => void | Promise<void>,
+) {
+  return onLoginEvent<LocalUsageReport>("burnrate-local-usage-updated", handler);
+}
+
 export async function loadDashboard(): Promise<DashboardState> {
   /* v8 ignore next 3: native Tauri invoke path */
   if (isTauri) {
@@ -380,6 +534,8 @@ export async function saveAccount(input: AccountInput): Promise<AccountView[]> {
     awsRegion: input.awsRegion ?? null,
     awsMonthlyBudgetUsd: input.awsMonthlyBudgetUsd ?? null,
     awsCategories: input.awsCategories ?? [],
+    copilotPlan: input.copilotPlan ?? null,
+    copilotCustomLimit: input.copilotCustomLimit ?? null,
     createdAt: now,
     updatedAt: now,
   };

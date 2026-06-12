@@ -10,6 +10,7 @@ pub(crate) enum ProviderKind {
     OpenRouter,
     Runpod,
     Aws,
+    Copilot,
 }
 
 impl ProviderKind {
@@ -20,6 +21,7 @@ impl ProviderKind {
             ProviderKind::OpenRouter => "openrouter",
             ProviderKind::Runpod => "runpod",
             ProviderKind::Aws => "aws",
+            ProviderKind::Copilot => "copilot",
         }
     }
 
@@ -32,6 +34,47 @@ impl ProviderKind {
             ProviderKind::OpenRouter => "OpenRouter",
             ProviderKind::Runpod => "Runpod",
             ProviderKind::Aws => "AWS",
+            ProviderKind::Copilot => "GitHub Copilot",
+        }
+    }
+}
+
+/// GitHub Copilot subscription tier, which determines the monthly premium
+/// request allowance. `Custom` defers to the account's
+/// `copilot_custom_limit` for plans with negotiated or unknown quotas.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum CopilotPlan {
+    Free,
+    Pro,
+    ProPlus,
+    Business,
+    Enterprise,
+    Custom,
+}
+
+impl CopilotPlan {
+    /// Monthly premium-request allowance per GitHub's published plan quotas.
+    /// `Custom` has no built-in allowance — the account's
+    /// `copilot_custom_limit` applies instead.
+    pub(crate) fn monthly_limit(self) -> Option<f64> {
+        match self {
+            CopilotPlan::Free => Some(50.0),
+            CopilotPlan::Pro | CopilotPlan::Business => Some(300.0),
+            CopilotPlan::ProPlus => Some(1500.0),
+            CopilotPlan::Enterprise => Some(1000.0),
+            CopilotPlan::Custom => None,
+        }
+    }
+
+    pub(crate) fn label(self) -> &'static str {
+        match self {
+            CopilotPlan::Free => "Free",
+            CopilotPlan::Pro => "Pro",
+            CopilotPlan::ProPlus => "Pro+",
+            CopilotPlan::Business => "Business",
+            CopilotPlan::Enterprise => "Enterprise",
+            CopilotPlan::Custom => "Custom",
         }
     }
 }
@@ -65,6 +108,11 @@ pub(crate) struct AppSettings {
     /// lower it to `0.5` to fit dense popovers before scrolling.
     #[serde(default = "default_tray_scale")]
     pub tray_scale: f64,
+    /// Whether claudex-backed local usage insights are collected and shown.
+    /// On by default; the opt-out exists because indexing builds (and keeps)
+    /// `~/.claudex/index.db` from local CLI session logs.
+    #[serde(default = "default_true")]
+    pub local_insights: bool,
 }
 
 impl Default for AppSettings {
@@ -73,6 +121,7 @@ impl Default for AppSettings {
             hide_from_dock: true,
             update_channel: UpdateChannel::default(),
             tray_scale: default_tray_scale(),
+            local_insights: true,
         }
     }
 }
@@ -111,6 +160,13 @@ pub(crate) struct AccountConfig {
     /// User-configurable Cost Explorer categories shown as sub-buckets.
     #[serde(default)]
     pub aws_categories: Vec<AwsCategoryConfig>,
+    /// GitHub Copilot plan, which sets the monthly premium request allowance.
+    /// `None` shows usage without a limit.
+    #[serde(default)]
+    pub copilot_plan: Option<CopilotPlan>,
+    /// Monthly premium request allowance when `copilot_plan` is `Custom`.
+    #[serde(default)]
+    pub copilot_custom_limit: Option<f64>,
     /// Global display order; lower sorts first. `None` is legacy/unset and sorts
     /// after explicitly ordered accounts.
     #[serde(default)]
@@ -144,6 +200,10 @@ pub(crate) struct AccountInput {
     pub aws_monthly_budget_usd: Option<f64>,
     #[serde(default)]
     pub aws_categories: Vec<AwsCategoryConfig>,
+    #[serde(default)]
+    pub copilot_plan: Option<CopilotPlan>,
+    #[serde(default)]
+    pub copilot_custom_limit: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,6 +230,10 @@ pub(crate) struct AccountView {
     pub aws_monthly_budget_usd: Option<f64>,
     #[serde(default)]
     pub aws_categories: Vec<AwsCategoryConfig>,
+    #[serde(default)]
+    pub copilot_plan: Option<CopilotPlan>,
+    #[serde(default)]
+    pub copilot_custom_limit: Option<f64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -326,6 +390,66 @@ pub(crate) struct TraySummary {
     pub updated_at: DateTime<Utc>,
 }
 
+/// claudex-backed local usage metrics, aggregated per provider. Local session
+/// history cannot be split between multiple accounts of one provider, so these
+/// are provider-level — the UI says so rather than implying per-account
+/// precision.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalUsageReport {
+    /// False when insights are disabled, claudex has no data, or collection
+    /// failed; `message` carries the human-readable reason.
+    pub available: bool,
+    pub message: Option<String>,
+    pub providers: Vec<ProviderLocalUsage>,
+    pub generated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ProviderLocalUsage {
+    pub provider: ProviderKind,
+    pub today_cost_usd: f64,
+    pub today_sessions: i64,
+    pub week_cost_usd: f64,
+    pub month_cost_usd: f64,
+    /// Linear month-end extrapolation of `month_cost_usd`; `None` when there
+    /// is no spend yet.
+    pub projected_month_cost_usd: Option<f64>,
+    pub month_input_tokens: i64,
+    pub month_output_tokens: i64,
+    pub top_model: Option<String>,
+    pub model_distribution: Vec<LocalModelUsage>,
+    pub top_projects: Vec<LocalProjectCost>,
+    /// Daily cost buckets, ascending by date (sparkline source).
+    pub daily: Vec<LocalDailyUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalDailyUsage {
+    /// ISO date (`YYYY-MM-DD`).
+    pub date: String,
+    pub cost_usd: f64,
+    pub sessions: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalModelUsage {
+    pub model: String,
+    pub sessions: i64,
+    pub cost_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct LocalProjectCost {
+    pub project: String,
+    pub sessions: i64,
+    pub cost_usd: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -337,6 +461,7 @@ mod tests {
         assert_eq!(ProviderKind::OpenRouter.as_str(), "openrouter");
         assert_eq!(ProviderKind::Runpod.as_str(), "runpod");
         assert_eq!(ProviderKind::Aws.as_str(), "aws");
+        assert_eq!(ProviderKind::Copilot.as_str(), "copilot");
         assert_eq!(
             serde_json::to_string(&ProviderKind::OpenRouter).unwrap(),
             "\"openrouter\""
@@ -345,6 +470,29 @@ mod tests {
             serde_json::from_str::<ProviderKind>("\"open-router\"").unwrap(),
             ProviderKind::OpenRouter
         );
+        assert_eq!(
+            serde_json::to_string(&ProviderKind::Copilot).unwrap(),
+            "\"copilot\""
+        );
+    }
+
+    #[test]
+    fn copilot_plans_use_stable_wire_names() {
+        assert_eq!(
+            serde_json::to_string(&CopilotPlan::ProPlus).unwrap(),
+            "\"pro-plus\""
+        );
+        assert_eq!(
+            serde_json::from_str::<CopilotPlan>("\"enterprise\"").unwrap(),
+            CopilotPlan::Enterprise
+        );
+    }
+
+    #[test]
+    fn settings_without_local_insights_field_default_to_enabled() {
+        let settings: AppSettings = serde_json::from_str(r#"{"hideFromDock":false}"#).unwrap();
+        assert!(settings.local_insights);
+        assert!(AppSettings::default().local_insights);
     }
 
     #[test]

@@ -12,9 +12,11 @@ import {
   getAppVersion,
   guardedFetch,
   isStale,
+  localUsage as fetchLocalUsage,
   logoutAccount,
   markFetched,
   onDashboardUpdated,
+  onLocalUsageUpdated,
   onRefreshRequested,
   onSettingsUpdated,
   openPreferences,
@@ -43,6 +45,7 @@ import type {
   AccountView,
   AppSettings,
   DashboardState,
+  LocalUsageReport,
   ProviderKind,
   UpdateChannel,
   UsageSnapshot,
@@ -64,6 +67,8 @@ export function App() {
   );
   const [form, setForm] = useState<AccountInput>(emptyForm);
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [localUsageReport, setLocalUsageReport] =
+    useState<LocalUsageReport | null>(null);
   // Spinner only on a true cold start (no cached data to show).
   const [busy, setBusy] = useState(() => readCachedDashboard() === null);
   const [error, setError] = useState<string | null>(null);
@@ -167,6 +172,37 @@ export function App() {
     };
   }, []);
 
+  // Local insights hydrate independently of the quota dashboard: fetch once on
+  // mount (cheap when the backend has a cached report) and mirror the
+  // post-refresh broadcast thereafter. Never blocks quota rendering.
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    let disposed = false;
+    void fetchLocalUsage()
+      .then((report) => {
+        if (!disposed) {
+          setLocalUsageReport(report);
+        }
+      })
+      .catch(() => {
+        // Insights are auxiliary; a failed hydrate just leaves the section in
+        // its collecting state until the next broadcast.
+      });
+    void onLocalUsageUpdated((report) => {
+      setLocalUsageReport(report);
+    }).then((unlisten) => {
+      if (disposed) {
+        unlisten();
+      } else {
+        cleanup = unlisten;
+      }
+    });
+    return () => {
+      disposed = true;
+      cleanup?.();
+    };
+  }, []);
+
   const accounts = state?.accounts ?? [];
   const summary = useMemo(
     () => summaryFromBackend(state?.traySummary, snapshots),
@@ -176,6 +212,7 @@ export function App() {
     hideFromDock: state?.settings?.hideFromDock ?? true,
     updateChannel: state?.settings?.updateChannel ?? "stable",
     trayScale: state?.settings?.trayScale ?? TRAY_MAX_SCALE,
+    localInsights: state?.settings?.localInsights ?? true,
   };
 
   async function updateSettings(next: AppSettings) {
@@ -341,6 +378,7 @@ export function App() {
     activeId,
     form.provider,
     form.secretStorage,
+    localUsageReport,
   ]);
 
   useLayoutEffect(() => {
@@ -437,6 +475,7 @@ export function App() {
     accounts,
     summary.label,
     settings.trayScale,
+    localUsageReport,
   ]);
 
   async function onSubmit(event: FormEvent) {
@@ -462,6 +501,11 @@ export function App() {
         awsProfile: form.awsProfile?.trim() || null,
         awsRegion: form.awsRegion?.trim() || null,
         awsCategories: form.awsCategories ?? [],
+        copilotPlan: form.provider === "copilot" ? (form.copilotPlan ?? null) : null,
+        copilotCustomLimit:
+          form.provider === "copilot" && form.copilotPlan === "custom"
+            ? (form.copilotCustomLimit ?? null)
+            : null,
       });
       updateAccounts(accounts, settings, summary);
       setForm(emptyForm);
@@ -501,6 +545,8 @@ export function App() {
             ? account.awsCategories
             : cloneDefaultAwsCategories()
           : [],
+      copilotPlan: account.copilotPlan ?? null,
+      copilotCustomLimit: account.copilotCustomLimit ?? null,
     });
   }
 
@@ -572,6 +618,8 @@ export function App() {
       awsRegion: provider === "aws" ? "us-east-1" : null,
       awsMonthlyBudgetUsd: null,
       awsCategories: provider === "aws" ? cloneDefaultAwsCategories() : [],
+      copilotPlan: null,
+      copilotCustomLimit: null,
     });
   }
 
@@ -618,6 +666,7 @@ export function App() {
         snapshots={snapshots}
         busy={busy}
         error={error}
+        localUsage={settings.localInsights ? localUsageReport : null}
         updateAvailable={updater.state.available}
         onRefresh={() => void revalidate({ force: true })}
         onOpenPreferences={() => void openPreferences()}
@@ -650,6 +699,12 @@ export function App() {
         settings={{
           trayScale: settings.trayScale,
           onTrayScaleChange: (scale) => void onTrayScaleChange(scale),
+        }}
+        insights={{
+          report: localUsageReport,
+          enabled: settings.localInsights,
+          onToggle: (enabled) =>
+            void updateSettings({ ...settings, localInsights: enabled }),
         }}
         updates={{
           channel: settings.updateChannel,
