@@ -1,7 +1,7 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
-import { InsightsPanel } from "./InsightsPanel";
+import { InsightsPanel, shortenProjectPath } from "./InsightsPanel";
 import { LocalUsageSummary } from "./LocalUsageSummary";
 import { BarSeries, Sparkline } from "./Sparkline";
 import { TrayPanel } from "./TrayPanel";
@@ -49,6 +49,43 @@ function report(providers: ProviderLocalUsage[]): LocalUsageReport {
     generatedAt: new Date().toISOString(),
   };
 }
+
+test("shortenProjectPath keeps short names and trims deep paths to two segments", () => {
+  expect(shortenProjectPath("burnrate")).toBe("burnrate");
+  expect(shortenProjectPath("utensils/aethon")).toBe("utensils/aethon");
+  // Short paths are normalized — no stray leading/trailing slashes.
+  expect(shortenProjectPath("/foo/bar/")).toBe("foo/bar");
+  expect(shortenProjectPath("/")).toBe("/");
+  expect(
+    shortenProjectPath("/Users/jamesbrink/Projects/utensils/aethon"),
+  ).toBe("…/utensils/aethon");
+});
+
+test("InsightsPanel shows shortened project paths with the full path as tooltip", () => {
+  render(
+    <InsightsPanel
+      report={report([
+        providerUsage({
+          topProjects: [
+            {
+              project: "/Users/jamesbrink/Projects/utensils/aethon",
+              sessions: 4,
+              costUsd: 9.5,
+            },
+          ],
+        }),
+      ])}
+      enabled={true}
+      onToggle={vi.fn()}
+    />,
+  );
+
+  const entry = screen.getByText("…/utensils/aethon");
+  expect(entry).toHaveAttribute(
+    "title",
+    "/Users/jamesbrink/Projects/utensils/aethon",
+  );
+});
 
 test("formatUsd keeps cents for small amounts and drops them past $100", () => {
   expect(formatUsd(1.842)).toBe("$1.84");
