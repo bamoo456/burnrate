@@ -1,5 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import {
+  PhysicalPosition,
+  cursorPosition,
+  getCurrentWindow,
+} from "@tauri-apps/api/window";
 import { cloneDefaultAwsCategories } from "./constants";
 import type {
   AccountInput,
@@ -494,7 +499,10 @@ export async function localUsage(): Promise<LocalUsageReport> {
 export async function onLocalUsageUpdated(
   handler: (report: LocalUsageReport) => void | Promise<void>,
 ) {
-  return onLoginEvent<LocalUsageReport>("burnrate-local-usage-updated", handler);
+  return onLoginEvent<LocalUsageReport>(
+    "burnrate-local-usage-updated",
+    handler,
+  );
 }
 
 export async function loadDashboard(): Promise<DashboardState> {
@@ -812,6 +820,78 @@ export async function openPreferences(): Promise<void> {
   }
 }
 
+export async function startWindowDrag(): Promise<void> {
+  /* v8 ignore next 8: native Tauri window path */
+  if (isTauri) {
+    try {
+      await getCurrentWindow().startDragging();
+    } catch (error) {
+      console.debug("Window drag was not started", error);
+    }
+  }
+}
+
+export type WindowDragSnapshot = {
+  cursor: { x: number; y: number };
+  window: { x: number; y: number };
+};
+
+export async function windowDragSnapshot(): Promise<WindowDragSnapshot | null> {
+  /* v8 ignore next 13: native Tauri window path */
+  if (!isTauri) {
+    return null;
+  }
+
+  try {
+    const [cursor, window] = await Promise.all([
+      cursorPosition(),
+      getCurrentWindow().outerPosition(),
+    ]);
+    return {
+      cursor: { x: cursor.x, y: cursor.y },
+      window: { x: window.x, y: window.y },
+    };
+  } catch (error) {
+    console.debug("Window drag snapshot was not available", error);
+    return null;
+  }
+}
+
+export async function moveCurrentWindow(position: {
+  x: number;
+  y: number;
+}): Promise<void> {
+  /* v8 ignore next 8: native Tauri window path */
+  if (!isTauri) {
+    return;
+  }
+
+  try {
+    await getCurrentWindow().setPosition(
+      new PhysicalPosition(Math.round(position.x), Math.round(position.y)),
+    );
+  } catch (error) {
+    console.debug("Window move was not applied", error);
+  }
+}
+
+export async function currentCursorPosition(): Promise<{
+  x: number;
+  y: number;
+} | null> {
+  /* v8 ignore next 10: native Tauri window path */
+  if (!isTauri) {
+    return null;
+  }
+  try {
+    const cursor = await cursorPosition();
+    return { x: cursor.x, y: cursor.y };
+  } catch (error) {
+    console.debug("Cursor position was not available", error);
+    return null;
+  }
+}
+
 /** Dismiss the tray popover (Esc). */
 export async function hideTray(): Promise<void> {
   /* v8 ignore next 3: native Tauri invoke path */
@@ -897,8 +977,7 @@ export async function checkForUpdates(
   if (isTauri) {
     return invoke<UpdateInfo | null>("check_for_updates", { channel });
   }
-  const info =
-    import.meta.env.VITE_MOCK_UPDATE === "1" ? MOCK_UPDATE : null;
+  const info = import.meta.env.VITE_MOCK_UPDATE === "1" ? MOCK_UPDATE : null;
   // Mirror the backend, which broadcasts every check result so the tray
   // window can mirror availability without polling.
   window.dispatchEvent(

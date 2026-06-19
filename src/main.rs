@@ -5,6 +5,8 @@ mod config;
 mod debug;
 mod insights;
 mod key_store;
+#[cfg(target_os = "linux")]
+mod linux_desktop;
 mod models;
 mod providers;
 mod storage;
@@ -495,6 +497,9 @@ fn show_fatal_alert(message: &str) {
 }
 
 fn main() {
+    #[cfg(target_os = "linux")]
+    linux_desktop::apply_runtime_environment();
+
     // Headless diagnostics: `burnrate debug <env|detect|load|snapshot>` runs the
     // real provider/config code paths and exits without starting the GUI.
     let args: Vec<String> = std::env::args().collect();
@@ -529,7 +534,11 @@ fn main() {
                     }
                 });
             }
-            // Dismiss the tray popover when it loses focus (click-away / app switch).
+            // Dismiss the tray popover when it loses focus (click-away / app
+            // switch). Linux AppIndicator/XWayland focus can be lost while
+            // moving from the tray icon into the popover, so Linux keeps the
+            // panel open until the user toggles it or presses Esc.
+            #[cfg(any(target_os = "macos", target_os = "windows"))]
             if let Some(window) = app.get_webview_window(tray::TRAY_WINDOW) {
                 let app_handle = app.handle().clone();
                 window.on_window_event(move |event| {

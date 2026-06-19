@@ -4,6 +4,7 @@ import {
   __resetMockLogins,
   cancelAccountLogin,
   checkForUpdates,
+  currentCursorPosition,
   detectAccounts,
   getAppVersion,
   guardedFetch,
@@ -11,6 +12,7 @@ import {
   isStale,
   logoutAccount,
   markFetched,
+  moveCurrentWindow,
   notifyUpdateAvailable,
   onCheckUpdateRequested,
   onLoginComplete,
@@ -25,8 +27,10 @@ import {
   reorderAccounts,
   resizeTrayToContent,
   startAccountLogin,
+  startWindowDrag,
   summarizeMockSnapshots,
   writeCachedDashboard,
+  windowDragSnapshot,
 } from "./api";
 import type {
   DashboardState,
@@ -258,6 +262,10 @@ test("updater mock is dormant unless VITE_MOCK_UPDATE is set", async () => {
   expect(await getAppVersion()).toBe("dev");
   // No-op outside Tauri — just shouldn't throw.
   await openPreferences();
+  await startWindowDrag();
+  await moveCurrentWindow({ x: 10, y: 20 });
+  expect(await windowDragSnapshot()).toBeNull();
+  expect(await currentCursorPosition()).toBeNull();
 });
 
 test("updater mock advertises an update when opted in", async () => {

@@ -61,6 +61,17 @@ fn env_report() -> i32 {
             .display()
             .to_string(),
     });
+    #[cfg(target_os = "linux")]
+    let report = {
+        let mut report = report;
+        if let Some(report) = report.as_object_mut() {
+            report.insert(
+                "linuxDesktop".to_string(),
+                crate::linux_desktop::LinuxDesktopInfo::current().summary(),
+            );
+        }
+        report
+    };
     println!(
         "{}",
         serde_json::to_string_pretty(&report).expect("serialize env report")

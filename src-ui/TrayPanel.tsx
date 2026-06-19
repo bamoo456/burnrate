@@ -7,7 +7,21 @@ import {
   Settings,
   ShieldCheck,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+  type PointerEvent,
+  type ReactNode,
+} from "react";
+import {
+  currentCursorPosition,
+  moveCurrentWindow,
+  startWindowDrag,
+  windowDragSnapshot,
+  type WindowDragSnapshot,
+} from "./api";
 import {
   bucketMeterLabel,
   bucketPercent,
@@ -84,6 +98,8 @@ export function TrayPanel({
   // Re-render periodically so the relative "Updated …" label stays honest
   // while the popover sits open.
   const [, setFreshnessTick] = useState(0);
+  const manualDrag = useRef<ManualWindowDrag | null>(null);
+  const manualDragToken = useRef(0);
   useEffect(() => {
     if (snapshots.length === 0) {
       return;
@@ -119,9 +135,27 @@ export function TrayPanel({
   };
 
   return (
-    <main className={`tray-panel${isDense ? " tray-panel-dense" : ""}`}>
-      <header className="tray-header">
-        <div>
+    <main
+      className={`tray-panel${isDense ? " tray-panel-dense" : ""}`}
+      data-tauri-drag-region
+    >
+      <header
+        className="tray-header"
+        data-tauri-drag-region
+        onPointerDown={(event) => {
+          startTrayHeaderDrag(event, manualDrag, manualDragToken);
+        }}
+        onPointerMove={() => {
+          void moveTrayHeaderDrag(manualDrag);
+        }}
+        onPointerUp={(event) => {
+          stopTrayHeaderDrag(event, manualDrag, manualDragToken);
+        }}
+        onPointerCancel={(event) => {
+          stopTrayHeaderDrag(event, manualDrag, manualDragToken);
+        }}
+      >
+        <div data-tauri-drag-region>
           <h1>Burnrate</h1>
           <p>{summary}</p>
           {updatedAgo ? (
@@ -216,6 +250,99 @@ export function TrayPanel({
         ) : null}
       </div>
     </main>
+  );
+}
+
+type ManualWindowDrag = {
+  pointerId: number;
+  start: WindowDragSnapshot;
+  frame: number | null;
+  moving: boolean;
+};
+
+function startTrayHeaderDrag(
+  event: PointerEvent<HTMLElement>,
+  manualDrag: MutableRefObject<ManualWindowDrag | null>,
+  manualDragToken: MutableRefObject<number>,
+) {
+  if (event.button !== 0 || isInteractiveDragTarget(event.target)) {
+    return;
+  }
+
+  const token = manualDragToken.current + 1;
+  manualDragToken.current = token;
+  event.currentTarget.setPointerCapture?.(event.pointerId);
+  void startWindowDrag();
+  void windowDragSnapshot()
+    .then((start) => {
+      if (!start || manualDragToken.current !== token) {
+        return;
+      }
+      manualDrag.current = {
+        pointerId: event.pointerId,
+        start,
+        frame: null,
+        moving: false,
+      };
+    })
+    .catch(() => {});
+}
+
+async function moveTrayHeaderDrag(
+  manualDrag: MutableRefObject<ManualWindowDrag | null>,
+) {
+  const drag = manualDrag.current;
+  if (!drag || drag.frame !== null || drag.moving) {
+    return;
+  }
+
+  drag.frame = window.requestAnimationFrame(() => {
+    drag.frame = null;
+    drag.moving = true;
+    void moveDragFrame(drag)
+      .catch(() => {})
+      .finally(() => {
+        drag.moving = false;
+      });
+  });
+}
+
+async function moveDragFrame(drag: ManualWindowDrag) {
+  const cursor = await currentCursorPosition();
+  if (!cursor) {
+    return;
+  }
+
+  await moveCurrentWindow({
+    x: drag.start.window.x + cursor.x - drag.start.cursor.x,
+    y: drag.start.window.y + cursor.y - drag.start.cursor.y,
+  });
+}
+
+function stopTrayHeaderDrag(
+  event: PointerEvent<HTMLElement>,
+  manualDrag: MutableRefObject<ManualWindowDrag | null>,
+  manualDragToken: MutableRefObject<number>,
+) {
+  manualDragToken.current += 1;
+  const drag = manualDrag.current;
+  if (drag && drag.frame !== null) {
+    window.cancelAnimationFrame(drag.frame);
+  }
+  manualDrag.current = null;
+  if (event.currentTarget.hasPointerCapture?.(event.pointerId)) {
+    event.currentTarget.releasePointerCapture(event.pointerId);
+  }
+}
+
+function isInteractiveDragTarget(target: EventTarget): boolean {
+  return (
+    target instanceof Element &&
+    Boolean(
+      target.closest(
+        "button, a, input, textarea, select, [role='button'], [data-no-window-drag]",
+      ),
+    )
   );
 }
 

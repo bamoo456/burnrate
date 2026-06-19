@@ -96,10 +96,29 @@
             pkgs.libsoup_3
             pkgs.glib
             pkgs.glib-networking
+            pkgs.dbus
+            pkgs.zlib
             pkgs.openssl
             pkgs.libayatana-appindicator
             pkgs.gsettings-desktop-schemas
           ];
+
+          linuxGSettingsSchemaDirs = lib.optionals pkgs.stdenv.isLinux [
+            "${pkgs.gtk3}/share/gsettings-schemas/${pkgs.gtk3.name}"
+            "${pkgs.gsettings-desktop-schemas}/share/gsettings-schemas/${pkgs.gsettings-desktop-schemas.name}"
+          ];
+
+          linuxPkgConfigPath = lib.concatStringsSep ":" [
+            (lib.makeSearchPath "lib/pkgconfig" (map lib.getDev linuxTauriInputs))
+            (lib.makeSearchPath "share/pkgconfig" (map lib.getDev linuxTauriInputs))
+          ];
+
+          linuxCargoTarget =
+            {
+              x86_64-linux = "X86_64_UNKNOWN_LINUX_GNU";
+              aarch64-linux = "AARCH64_UNKNOWN_LINUX_GNU";
+            }
+            .${system} or null;
 
           darwinTauriInputs = [ ];
 
@@ -223,13 +242,17 @@
             '';
 
             packages = [
+              pkgs.cargo
               pkgs.cargo-tauri
+              pkgs.clippy
               pkgs.git
               pkgs.gh
               pkgs.nodejs_22
               pkgs.openssl
               pkgs.pkg-config
-              pkgs.rustup
+              pkgs.rustc
+              pkgs.rustfmt
+              pkgs.stdenv.cc
               config.treefmt.build.wrapper
             ]
             ++ linuxTauriInputs
@@ -276,20 +299,34 @@
             ]
             ++ lib.optionals pkgs.stdenv.isLinux [
               {
+                name = "CC";
+                value = "${pkgs.stdenv.cc}/bin/cc";
+              }
+              {
+                name = "CXX";
+                value = "${pkgs.stdenv.cc}/bin/c++";
+              }
+              {
+                name = "CARGO_TARGET_${linuxCargoTarget}_LINKER";
+                value = "${pkgs.stdenv.cc}/bin/cc";
+              }
+              {
                 name = "PKG_CONFIG_PATH";
-                value = lib.makeSearchPath "lib/pkgconfig" (map lib.getDev linuxTauriInputs);
+                value = linuxPkgConfigPath;
               }
               {
                 name = "LD_LIBRARY_PATH";
                 value = lib.makeLibraryPath linuxTauriInputs;
               }
               {
-                name = "WEBKIT_DISABLE_DMABUF_RENDERER";
-                value = "1";
-              }
-              {
                 name = "GIO_EXTRA_MODULES";
                 prefix = "${pkgs.glib-networking}/lib/gio/modules";
+              }
+              {
+                name = "XDG_DATA_DIRS";
+                prefix = lib.concatStringsSep ":" (
+                  (map (pkg: "${pkg}/share") linuxTauriInputs) ++ linuxGSettingsSchemaDirs
+                );
               }
             ];
 

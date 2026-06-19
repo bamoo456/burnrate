@@ -26,6 +26,7 @@ const api = vi.hoisted(() => ({
   cancelAccountLogin: vi.fn(),
   checkForUpdates: vi.fn(),
   closePreferences: vi.fn(),
+  currentCursorPosition: vi.fn(),
   detectAccounts: vi.fn(),
   getAppVersion: vi.fn(),
   guardedFetch: vi.fn(),
@@ -35,6 +36,7 @@ const api = vi.hoisted(() => ({
   localUsage: vi.fn(),
   logoutAccount: vi.fn(),
   markFetched: vi.fn(),
+  moveCurrentWindow: vi.fn(),
   notifyUpdateAvailable: vi.fn(),
   onCheckUpdateRequested: vi.fn(),
   onDashboardUpdated: vi.fn(),
@@ -55,8 +57,10 @@ const api = vi.hoisted(() => ({
   saveAccount: vi.fn(),
   saveSettings: vi.fn(),
   startAccountLogin: vi.fn(),
+  startWindowDrag: vi.fn(),
   submitLoginCode: vi.fn(),
   updaterAvailable: vi.fn(),
+  windowDragSnapshot: vi.fn(),
 }));
 
 vi.mock("./api", () => api);
@@ -80,8 +84,12 @@ beforeEach(() => {
   api.openPreferences.mockResolvedValue(undefined);
   api.reorderAccounts.mockResolvedValue([]);
   api.logoutAccount.mockResolvedValue([]);
+  api.currentCursorPosition.mockResolvedValue(null);
+  api.moveCurrentWindow.mockResolvedValue(undefined);
   api.startAccountLogin.mockResolvedValue({ id: "pending-1" });
+  api.startWindowDrag.mockResolvedValue(undefined);
   api.submitLoginCode.mockResolvedValue(undefined);
+  api.windowDragSnapshot.mockResolvedValue(null);
   api.cancelAccountLogin.mockResolvedValue([]);
   api.guardedFetch.mockResolvedValue(dashboardState());
   // Default: cold start (no cached dashboard) so existing tests exercise the
@@ -1008,6 +1016,183 @@ test("keeps tray usage and the accounts footer in an internal scroll region", ()
   expect(scroll).toContainElement(screen.getByLabelText("Usage"));
   expect(scroll).toContainElement(screen.getByText("1 account off"));
   expect(scroll).not.toContainElement(document.querySelector(".tray-header"));
+});
+
+test("drags the tray window from the header", async () => {
+  api.windowDragSnapshot.mockResolvedValue({
+    cursor: { x: 100, y: 200 },
+    window: { x: 500, y: 600 },
+  });
+  api.currentCursorPosition.mockResolvedValue({ x: 135, y: 260 });
+  const requestAnimationFrameSpy = vi
+    .spyOn(window, "requestAnimationFrame")
+    .mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+  const cancelAnimationFrameSpy = vi
+    .spyOn(window, "cancelAnimationFrame")
+    .mockImplementation(() => {});
+
+  try {
+    render(
+      <TrayPanel
+        state={dashboardState()}
+        snapshots={[snapshot("healthy")]}
+        busy={false}
+        error={null}
+        onRefresh={() => {}}
+        onOpenPreferences={() => {}}
+        onReorderAccounts={() => {}}
+      />,
+    );
+
+    const header = document.querySelector(".tray-header");
+    expect(header).toBeInTheDocument();
+    fireEvent.pointerDown(header!, { button: 0, pointerId: 7 });
+    await waitFor(() => expect(api.windowDragSnapshot).toHaveBeenCalledOnce());
+    expect(api.startWindowDrag).toHaveBeenCalledOnce();
+
+    fireEvent.pointerMove(header!, { pointerId: 7 });
+
+    await waitFor(() =>
+      expect(api.moveCurrentWindow).toHaveBeenCalledWith({ x: 535, y: 660 }),
+    );
+  } finally {
+    requestAnimationFrameSpy.mockRestore();
+    cancelAnimationFrameSpy.mockRestore();
+  }
+});
+
+test("does not start a tray window drag from header buttons", () => {
+  render(
+    <TrayPanel
+      state={dashboardState()}
+      snapshots={[snapshot("healthy")]}
+      busy={false}
+      error={null}
+      onRefresh={() => {}}
+      onOpenPreferences={() => {}}
+      onReorderAccounts={() => {}}
+    />,
+  );
+
+  fireEvent.pointerDown(screen.getByTitle("Refresh"), {
+    button: 0,
+    pointerId: 8,
+  });
+
+  expect(api.startWindowDrag).not.toHaveBeenCalled();
+  expect(api.windowDragSnapshot).not.toHaveBeenCalled();
+});
+
+test("ignores tray drag snapshots that resolve after pointer release", async () => {
+  let resolveSnapshot: (value: {
+    cursor: { x: number; y: number };
+    window: { x: number; y: number };
+  }) => void = () => {};
+  api.windowDragSnapshot.mockReturnValue(
+    new Promise((resolve) => {
+      resolveSnapshot = resolve;
+    }),
+  );
+  api.currentCursorPosition.mockResolvedValue({ x: 135, y: 260 });
+
+  render(
+    <TrayPanel
+      state={dashboardState()}
+      snapshots={[snapshot("healthy")]}
+      busy={false}
+      error={null}
+      onRefresh={() => {}}
+      onOpenPreferences={() => {}}
+      onReorderAccounts={() => {}}
+    />,
+  );
+
+  const header = document.querySelector(".tray-header");
+  expect(header).toBeInTheDocument();
+
+  fireEvent.pointerDown(header!, { button: 0, pointerId: 9 });
+  fireEvent.pointerUp(header!, { button: 0, pointerId: 9 });
+  resolveSnapshot({
+    cursor: { x: 100, y: 200 },
+    window: { x: 500, y: 600 },
+  });
+  await Promise.resolve();
+  fireEvent.pointerMove(header!, { pointerId: 9 });
+
+  expect(api.moveCurrentWindow).not.toHaveBeenCalled();
+});
+
+test("ignores failed tray drag snapshots", async () => {
+  api.windowDragSnapshot.mockRejectedValue(new Error("snapshot unavailable"));
+
+  render(
+    <TrayPanel
+      state={dashboardState()}
+      snapshots={[snapshot("healthy")]}
+      busy={false}
+      error={null}
+      onRefresh={() => {}}
+      onOpenPreferences={() => {}}
+      onReorderAccounts={() => {}}
+    />,
+  );
+
+  const header = document.querySelector(".tray-header");
+  expect(header).toBeInTheDocument();
+  fireEvent.pointerDown(header!, { button: 0, pointerId: 10 });
+
+  await waitFor(() => expect(api.windowDragSnapshot).toHaveBeenCalledOnce());
+  fireEvent.pointerMove(header!, { pointerId: 10 });
+
+  expect(api.moveCurrentWindow).not.toHaveBeenCalled();
+});
+
+test("handles failed tray window moves", async () => {
+  api.windowDragSnapshot.mockResolvedValue({
+    cursor: { x: 100, y: 200 },
+    window: { x: 500, y: 600 },
+  });
+  api.currentCursorPosition.mockResolvedValue({ x: 135, y: 260 });
+  api.moveCurrentWindow.mockRejectedValueOnce(new Error("move denied"));
+  const requestAnimationFrameSpy = vi
+    .spyOn(window, "requestAnimationFrame")
+    .mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+  const cancelAnimationFrameSpy = vi
+    .spyOn(window, "cancelAnimationFrame")
+    .mockImplementation(() => {});
+
+  try {
+    render(
+      <TrayPanel
+        state={dashboardState()}
+        snapshots={[snapshot("healthy")]}
+        busy={false}
+        error={null}
+        onRefresh={() => {}}
+        onOpenPreferences={() => {}}
+        onReorderAccounts={() => {}}
+      />,
+    );
+
+    const header = document.querySelector(".tray-header");
+    expect(header).toBeInTheDocument();
+    fireEvent.pointerDown(header!, { button: 0, pointerId: 11 });
+    await waitFor(() => expect(api.windowDragSnapshot).toHaveBeenCalledOnce());
+
+    fireEvent.pointerMove(header!, { pointerId: 11 });
+    await waitFor(() =>
+      expect(api.moveCurrentWindow).toHaveBeenCalledWith({ x: 535, y: 660 }),
+    );
+  } finally {
+    requestAnimationFrameSpy.mockRestore();
+    cancelAnimationFrameSpy.mockRestore();
+  }
 });
 
 test("re-fetches and re-caches the dashboard after detecting accounts", async () => {
