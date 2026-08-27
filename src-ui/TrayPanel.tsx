@@ -29,6 +29,7 @@ import {
   formatAgo,
   formatLimit,
   formatReset,
+  hasAwsCostData,
 } from "./format";
 import { LocalUsageSummary } from "./LocalUsageSummary";
 import { ProviderLogo } from "./ProviderLogo";
@@ -402,6 +403,9 @@ function TraySnapshot({
               <span>{providerLabels[snapshot.provider]}</span>
               {snapshot.email ? (
                 <span className="tray-email">{snapshot.email}</span>
+              ) : null}
+              {hasAwsCostData(snapshot) ? (
+                <span>AWS cost data · {formatAgo(snapshot.fetchedAt)}</span>
               ) : null}
             </div>
           </div>

@@ -41,26 +41,73 @@ struct CostGroup {
     unit: String,
 }
 
-pub(crate) async fn fetch(account: &AccountConfig) -> Result<UsageSnapshot> {
-    let shared_config = sdk_config(account).await;
-    let identity = caller_identity(&shared_config).await?;
-    let client = CostExplorerClient::new(&shared_config);
-    let period = current_month_period()?;
+#[derive(Debug)]
+pub(crate) struct AwsFetchError {
+    error: anyhow::Error,
+    cost_explorer_attempted: bool,
+}
 
-    let overall = query_cost(&client, period.clone(), None, None)
+impl AwsFetchError {
+    fn before_cost_explorer(error: anyhow::Error) -> Self {
+        Self {
+            error,
+            cost_explorer_attempted: false,
+        }
+    }
+
+    fn after_cost_explorer(error: anyhow::Error) -> Self {
+        Self {
+            error,
+            cost_explorer_attempted: true,
+        }
+    }
+
+    pub(crate) fn into_parts(self) -> (anyhow::Error, bool) {
+        (self.error, self.cost_explorer_attempted)
+    }
+}
+
+pub(crate) async fn fetch(
+    account: &AccountConfig,
+) -> std::result::Result<UsageSnapshot, AwsFetchError> {
+    let shared_config = sdk_config(account).await;
+    let identity = caller_identity(&shared_config)
         .await
-        .context("AWS Cost Explorer GetCostAndUsage failed for all AWS spend")?;
+        .map_err(AwsFetchError::before_cost_explorer)?;
+    let client = CostExplorerClient::new(&shared_config);
+    let period = current_month_period().map_err(AwsFetchError::before_cost_explorer)?;
+
+    // Group the account-wide request by service. Cost Explorer omits `total`
+    // for grouped results, so `parse_cost_page` sums the groups back into the
+    // overall amount. Simple SERVICE categories can then be derived locally
+    // instead of each generating another billable request.
+    let overall = query_cost(
+        &client,
+        period.clone(),
+        None,
+        group_definition(Some(&AwsGroupBy {
+            kind: AwsGroupByKind::Dimension,
+            key: "SERVICE".to_string(),
+        })),
+    )
+    .await
+    .context("AWS Cost Explorer GetCostAndUsage failed for all AWS spend")
+    .map_err(AwsFetchError::after_cost_explorer)?;
 
     let categories = enabled_categories(account);
     let mut category_results = Vec::new();
     for category in &categories {
-        let filter = category_filter_expression(category)?;
+        if let Some(result) = derive_service_category(category, &overall) {
+            category_results.push((category, result));
+            continue;
+        }
+        let filter =
+            category_filter_expression(category).map_err(AwsFetchError::after_cost_explorer)?;
         let group_by = group_definition(category.group_by.as_ref());
         let result = query_cost(&client, period.clone(), filter, group_by)
             .await
-            .with_context(|| {
-                format!("AWS Cost Explorer failed for category '{}'", category.label)
-            })?;
+            .with_context(|| format!("AWS Cost Explorer failed for category '{}'", category.label))
+            .map_err(AwsFetchError::after_cost_explorer)?;
         category_results.push((category, result));
     }
 
@@ -70,6 +117,54 @@ pub(crate) async fn fetch(account: &AccountConfig) -> Result<UsageSnapshot> {
         overall,
         &category_results,
     ))
+}
+
+/// Reuse the account-wide SERVICE grouping for category filters whose only
+/// semantic requirement is a set of service names. Category groupings are not
+/// exposed as separate buckets, so deriving their aggregate preserves the wire
+/// result while avoiding another Cost Explorer request.
+fn derive_service_category(
+    category: &AwsCategoryConfig,
+    overall: &CostQueryResult,
+) -> Option<CostQueryResult> {
+    if category.id == "all-aws" {
+        let mut result = overall.clone();
+        result.pages = 0;
+        return Some(result);
+    }
+    let AwsCostFilter::Dimension { key, values } = &category.filter else {
+        return None;
+    };
+    if !key.eq_ignore_ascii_case("SERVICE") {
+        return None;
+    }
+    let wanted: Vec<&str> = values
+        .iter()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .collect();
+    if wanted.is_empty() {
+        return None;
+    }
+
+    let amount = overall
+        .groups
+        .iter()
+        .filter(|group| {
+            group
+                .keys
+                .first()
+                .is_some_and(|service| wanted.iter().any(|value| service == value))
+        })
+        .map(|group| group.amount)
+        .sum();
+    Some(CostQueryResult {
+        amount,
+        unit: overall.unit.clone(),
+        estimated: overall.estimated,
+        pages: 0,
+        groups: Vec::new(),
+    })
 }
 
 fn snapshot_from_costs(
@@ -397,9 +492,10 @@ fn status_message(
     if estimated {
         parts.push("Cost Explorer marks current data as estimated".to_string());
     }
-    if pages > 1 {
-        parts.push(format!("read {pages} Cost Explorer pages"));
-    }
+    parts.push(format!(
+        "made {pages} billable Cost Explorer request{}",
+        if pages == 1 { "" } else { "s" }
+    ));
     if category_count > 0 {
         parts.push(format!("{category_count} enabled AWS categories"));
     }
@@ -649,7 +745,7 @@ mod tests {
             snapshot
                 .message
                 .unwrap()
-                .contains("read 3 Cost Explorer pages")
+                .contains("made 3 billable Cost Explorer requests")
         );
     }
 
@@ -686,7 +782,7 @@ mod tests {
         let message = status_message(&account(), "123456789012 (arn)", true, 3, 1).unwrap();
         assert!(message.contains("profile work"));
         assert!(message.contains("estimated"));
-        assert!(message.contains("read 3 Cost Explorer pages"));
+        assert!(message.contains("made 3 billable Cost Explorer requests"));
         assert!(message.contains("1 enabled AWS categories"));
     }
 
@@ -734,6 +830,97 @@ mod tests {
         let categories = enabled_categories(&account);
         assert_eq!(categories.len(), 1);
         assert_eq!(categories[0].id, "bedrock");
+    }
+
+    #[test]
+    fn derives_simple_service_categories_from_the_grouped_overall_query() {
+        let category = account().aws_categories.remove(0);
+        let overall = CostQueryResult {
+            amount: 12.0,
+            unit: USD.to_string(),
+            estimated: true,
+            pages: 1,
+            groups: vec![
+                CostGroup {
+                    keys: vec!["Amazon Bedrock".to_string()],
+                    amount: 4.5,
+                    unit: USD.to_string(),
+                },
+                CostGroup {
+                    keys: vec!["Amazon Simple Storage Service".to_string()],
+                    amount: 7.5,
+                    unit: USD.to_string(),
+                },
+            ],
+        };
+
+        let derived = derive_service_category(&category, &overall).unwrap();
+
+        assert_eq!(derived.amount, 4.5);
+        assert_eq!(derived.pages, 0);
+        assert!(derived.estimated);
+    }
+
+    #[test]
+    fn fetch_errors_record_whether_a_billable_request_was_attempted() {
+        let (error, attempted) =
+            AwsFetchError::before_cost_explorer(anyhow!("STS failed")).into_parts();
+        assert!(!attempted);
+        assert_eq!(error.to_string(), "STS failed");
+
+        let (error, attempted) =
+            AwsFetchError::after_cost_explorer(anyhow!("Cost Explorer failed")).into_parts();
+        assert!(attempted);
+        assert_eq!(error.to_string(), "Cost Explorer failed");
+    }
+
+    #[test]
+    fn derives_all_aws_but_rejects_blank_or_non_service_dimensions() {
+        let overall = CostQueryResult {
+            amount: 12.0,
+            unit: USD.to_string(),
+            estimated: false,
+            pages: 2,
+            groups: Vec::new(),
+        };
+        let mut category = account().aws_categories.remove(0);
+        category.id = "all-aws".to_string();
+        let derived = derive_service_category(&category, &overall).unwrap();
+        assert_eq!(derived.amount, 12.0);
+        assert_eq!(derived.pages, 0);
+
+        category.id = "custom".to_string();
+        category.filter = AwsCostFilter::Dimension {
+            key: "REGION".to_string(),
+            values: vec!["us-east-1".to_string()],
+        };
+        assert!(derive_service_category(&category, &overall).is_none());
+
+        category.filter = AwsCostFilter::Dimension {
+            key: "SERVICE".to_string(),
+            values: vec![" ".to_string()],
+        };
+        assert!(derive_service_category(&category, &overall).is_none());
+    }
+
+    #[test]
+    fn non_service_categories_need_an_extra_query_but_service_groupings_do_not() {
+        let mut category = account().aws_categories.remove(0);
+        category.filter = AwsCostFilter::Tag {
+            key: "Team".to_string(),
+            values: vec!["Platform".to_string()],
+        };
+        assert!(derive_service_category(&category, &CostQueryResult::default()).is_none());
+
+        category.filter = AwsCostFilter::Dimension {
+            key: "SERVICE".to_string(),
+            values: vec!["Amazon Bedrock".to_string()],
+        };
+        category.group_by = Some(AwsGroupBy {
+            kind: AwsGroupByKind::Tag,
+            key: "Team".to_string(),
+        });
+        assert!(derive_service_category(&category, &CostQueryResult::default()).is_some());
     }
 
     #[test]

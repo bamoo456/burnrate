@@ -26,6 +26,7 @@ use crate::{
 
 const PROVIDER_TIMEOUT: Duration = Duration::from_secs(15);
 const PROVIDER_CACHE_TTL_MS: u64 = 5 * 60 * 1000;
+const AWS_CACHE_TTL_MS: u64 = 24 * 60 * 60 * 1000;
 
 #[derive(Clone)]
 pub(crate) struct ProviderClient {
@@ -72,12 +73,20 @@ impl ProviderClient {
             return snapshot;
         }
 
-        let result = match account.provider {
+        let mut cache_failed_aws_attempt = false;
+        let result: Result<UsageSnapshot> = match account.provider {
             ProviderKind::ClaudeCode => claude::fetch(&self.http, account).await,
             ProviderKind::Codex => codex::fetch(&self.http, account).await,
             ProviderKind::OpenRouter => openrouter::fetch(&self.http, account).await,
             ProviderKind::Runpod => runpod::fetch(&self.http, account).await,
-            ProviderKind::Aws => aws::fetch(account).await,
+            ProviderKind::Aws => match aws::fetch(account).await {
+                Ok(snapshot) => Ok(snapshot),
+                Err(error) => {
+                    let (error, cost_explorer_attempted) = error.into_parts();
+                    cache_failed_aws_attempt = cost_explorer_attempted;
+                    Err(error)
+                }
+            },
             ProviderKind::Copilot => copilot::fetch(&self.http, account).await,
         };
 
@@ -86,7 +95,21 @@ impl ProviderClient {
                 self.remember_success(account, snapshot.clone(), now);
                 snapshot
             }
-            Err(error) => error_snapshot(account, error),
+            Err(error) => {
+                let snapshot = error_snapshot(account, error);
+                // A partially successful Cost Explorer collection can already
+                // have incurred billable requests before a later page/category
+                // fails. Cache AWS errors too so the background loop cannot
+                // retry paid work every five minutes. Editing the account
+                // changes its cache key and permits an immediate retry.
+                self.remember_failed_aws_attempt(
+                    account,
+                    snapshot.clone(),
+                    now,
+                    cache_failed_aws_attempt,
+                );
+                snapshot
+            }
         }
     }
 
@@ -106,7 +129,7 @@ impl ProviderClient {
         let cache = self.cache.lock().expect("provider cache lock");
         let entry = cache.get(&cache_key(account))?;
         let age = now.saturating_sub(entry.last_fetched_at);
-        (age < PROVIDER_CACHE_TTL_MS).then(|| entry.snapshot.clone())
+        (age < cache_ttl_ms(account.provider)).then(|| entry.snapshot.clone())
     }
 
     fn remember_success(&self, account: &AccountConfig, snapshot: UsageSnapshot, now: u64) {
@@ -120,6 +143,25 @@ impl ProviderClient {
                 last_fetched_at: now,
             },
         );
+    }
+
+    fn remember_failed_aws_attempt(
+        &self,
+        account: &AccountConfig,
+        snapshot: UsageSnapshot,
+        now: u64,
+        cost_explorer_attempted: bool,
+    ) {
+        if account.provider == ProviderKind::Aws && cost_explorer_attempted {
+            self.remember_success(account, snapshot, now);
+        }
+    }
+}
+
+fn cache_ttl_ms(provider: ProviderKind) -> u64 {
+    match provider {
+        ProviderKind::Aws => AWS_CACHE_TTL_MS,
+        _ => PROVIDER_CACHE_TTL_MS,
     }
 }
 
@@ -1135,6 +1177,61 @@ mod tests {
 
         assert_eq!(first.quota.as_ref().unwrap().remaining, Some(60.0));
         assert_eq!(second.quota.as_ref().unwrap().remaining, Some(60.0));
+    }
+
+    #[test]
+    fn aws_cache_is_fresh_until_the_exact_daily_boundary() {
+        let provider = ProviderClient::new();
+        let mut account = account();
+        account.id = "aws-cache-boundary".to_string();
+        account.provider = ProviderKind::Aws;
+        let snapshot = error_snapshot(&account, anyhow!("cached AWS snapshot"));
+        provider.remember_success(&account, snapshot, 1_000);
+
+        assert!(
+            provider
+                .cached_before_fetch(&account, 1_000 + AWS_CACHE_TTL_MS - 1)
+                .is_some()
+        );
+        assert!(
+            provider
+                .cached_before_fetch(&account, 1_000 + AWS_CACHE_TTL_MS)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn non_aws_cache_keeps_the_five_minute_boundary() {
+        let provider = ProviderClient::new();
+        let account = account();
+        let snapshot = error_snapshot(&account, anyhow!("cached provider snapshot"));
+        provider.remember_success(&account, snapshot, 1_000);
+
+        assert!(
+            provider
+                .cached_before_fetch(&account, 1_000 + PROVIDER_CACHE_TTL_MS - 1)
+                .is_some()
+        );
+        assert!(
+            provider
+                .cached_before_fetch(&account, 1_000 + PROVIDER_CACHE_TTL_MS)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn aws_auth_failures_remain_retryable_but_paid_attempt_failures_are_cached() {
+        let provider = ProviderClient::new();
+        let mut account = account();
+        account.id = "aws-error-recovery".to_string();
+        account.provider = ProviderKind::Aws;
+        let snapshot = error_snapshot(&account, anyhow!("AWS SSO token expired"));
+
+        provider.remember_failed_aws_attempt(&account, snapshot.clone(), 1_000, false);
+        assert!(provider.cached_before_fetch(&account, 1_001).is_none());
+
+        provider.remember_failed_aws_attempt(&account, snapshot, 1_000, true);
+        assert!(provider.cached_before_fetch(&account, 1_001).is_some());
     }
 
     #[tokio::test]
