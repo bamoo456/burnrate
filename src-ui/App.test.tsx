@@ -15,8 +15,6 @@ test("renders provider rows and snapshot states", async () => {
   render(<App />);
 
   expect((await screen.findAllByText("Claude Code")).length).toBeGreaterThan(0);
-  // The insights panel can hydrate before the dashboard snapshots — wait for
-  // the usage rows' status badge instead of assuming render order.
   expect((await screen.findAllByText("Warning")).length).toBeGreaterThan(0);
   expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
   expect(screen.getAllByText("5-hour").length).toBeGreaterThan(0);
@@ -29,18 +27,18 @@ test("renders provider rows and snapshot states", async () => {
   expect(screen.getByText("EC2 compute")).toBeInTheDocument();
   expect(screen.getByText("Current burn")).toBeInTheDocument();
   expect(screen.queryByText("Unknown plan")).not.toBeInTheDocument();
+  expect(screen.getByText("Account-managed only")).toBeInTheDocument();
 });
 
-test("adds a manual account through the modal wizard", async () => {
+test("adds a manual account through the hardened modal wizard", async () => {
   const user = userEvent.setup();
   render(<App />);
 
   await screen.findByRole("heading", { name: "Accounts" });
   await user.click(screen.getByTitle("Add account"));
   await user.click(screen.getByRole("menuitem", { name: "OpenRouter" }));
-  expect(screen.getByLabelText("Endpoint")).toHaveValue(
-    "https://openrouter.ai/api/v1/credits",
-  );
+  expect(screen.queryByLabelText("Endpoint")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Plaintext" })).not.toBeInTheDocument();
   await user.clear(screen.getByLabelText("Label"));
   await user.type(screen.getByLabelText("Label"), "OpenRouter Team");
   await user.type(screen.getByLabelText("API Key"), "sk-test");
@@ -81,7 +79,7 @@ test("adds an AWS account with profile and category presets", async () => {
   expect(await screen.findByText("AWS Team")).toBeInTheDocument();
 });
 
-test("adds a Codex account manually with plaintext storage and disabled state", async () => {
+test("adds a disabled Codex account with keyring-only manual auth", async () => {
   const user = userEvent.setup();
   render(<App />);
 
@@ -92,10 +90,11 @@ test("adds a Codex account manually with plaintext storage and disabled state", 
     screen.getByRole("menuitem", { name: /Enter a token manually/ }),
   );
   expect(screen.getByLabelText("Label")).toHaveValue("Codex");
+  expect(screen.queryByRole("button", { name: "Plaintext" })).not.toBeInTheDocument();
+  expect(screen.queryByLabelText("Endpoint")).not.toBeInTheDocument();
 
   const dialog = screen.getByRole("dialog");
-  await user.click(screen.getByRole("button", { name: "Plaintext" }));
-  await user.type(screen.getByLabelText("Endpoint"), "http://localhost:8787");
+  await user.type(screen.getByLabelText("API Key (optional)"), "codex-token");
   await user.click(within(dialog).getByLabelText("Enabled"));
   await user.clear(screen.getByLabelText("Label"));
   await user.type(screen.getByLabelText("Label"), "Codex Spare");
@@ -165,12 +164,12 @@ test("toggles an account from the sidebar switch", async () => {
   await waitFor(() => expect(offCount()).toBe(before + 1));
 });
 
-test("runs detect and refresh actions", async () => {
+test("exposes refresh but not system account detection", async () => {
   const user = userEvent.setup();
   render(<App />);
 
   await screen.findByRole("heading", { name: "Accounts" });
-  await user.click(screen.getByTitle("Detect accounts"));
+  expect(screen.queryByTitle("Detect accounts")).not.toBeInTheDocument();
   await user.click(screen.getByTitle("Refresh"));
 
   expect(await screen.findByText("Burnrate: 2 warning")).toBeInTheDocument();
