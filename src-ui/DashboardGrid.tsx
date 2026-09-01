@@ -119,6 +119,9 @@ function AccountIdentity({ snapshot }: { snapshot: UsageSnapshot }) {
             ))}
           </div>
         ) : null}
+        {snapshot.message ? (
+          <small className="dashboard-message">{snapshot.message}</small>
+        ) : null}
       </div>
     </div>
   );
