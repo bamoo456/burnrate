@@ -3,14 +3,54 @@ import type { UsageBucketSnapshot, UsageSnapshot } from "./types";
 export function primaryBucket(
   snapshot: UsageSnapshot,
 ): UsageBucketSnapshot | null {
-  return snapshot.usageBuckets[0] ?? bucketFromQuota(snapshot);
+  return displayBuckets(snapshot)[0] ?? null;
+}
+
+/**
+ * Buckets that represent real spendable money rather than a resettable usage
+ * window. Keep this normalization in one place so older backend snapshots can
+ * evolve without teaching every UI surface provider-specific ids.
+ */
+export function balanceBuckets(snapshot: UsageSnapshot): UsageBucketSnapshot[] {
+  return snapshot.usageBuckets.filter(
+    (bucket) => isBalanceBucket(snapshot, bucket) && hasBucketValue(bucket),
+  );
+}
+
+export function isBalanceBucket(
+  snapshot: UsageSnapshot,
+  bucket: UsageBucketSnapshot,
+): boolean {
+  if (bucket.window !== null) return false;
+  return (
+    (snapshot.provider === "openrouter" && bucket.id === "credits") ||
+    (snapshot.provider === "runpod" && bucket.id === "balance")
+  );
 }
 
 export function displayBuckets(snapshot: UsageSnapshot): UsageBucketSnapshot[] {
-  const buckets = snapshot.usageBuckets.filter(hasBucketValue);
+  const buckets = snapshot.usageBuckets.filter(
+    (bucket) => !isBalanceBucket(snapshot, bucket) && hasBucketValue(bucket),
+  );
   if (buckets.length > 0) return buckets;
+  // OpenRouter mirrors its credits bucket into the legacy `quota` field. Once
+  // we've recognized a real balance, don't resurrect that mirror as a fake
+  // resettable quota in the UI.
+  if (balanceBuckets(snapshot).length > 0) return [];
   const fallback = bucketFromQuota(snapshot);
   return fallback && hasBucketValue(fallback) ? [fallback] : [];
+}
+
+/**
+ * Providers where a balance exists conceptually but the authenticated provider
+ * API does not currently expose its numeric value. Showing this explicitly is
+ * better than silently implying that the balance is zero or unsupported by the
+ * product itself.
+ */
+export function balanceUnavailableReason(snapshot: UsageSnapshot): string | null {
+  return snapshot.provider === "opencode-go"
+    ? "Zen balance unavailable via API"
+    : null;
 }
 
 export function hasAwsCostData(snapshot: UsageSnapshot): boolean {
@@ -73,6 +113,17 @@ export function formatLimit(bucket: UsageBucketSnapshot): string {
       ? ""
       : ` / ${formatBucketNumber(bucket.limit, bucket.unit)}`;
   return `${value}${limit}`;
+}
+
+/** Numeric spendable balance only — never append the historical amount
+ * purchased or a spending limit, because those are not money currently left. */
+export function formatBalance(bucket: UsageBucketSnapshot): string {
+  const value =
+    bucket.remaining ??
+    (bucket.limit !== null
+      ? Math.max(0, bucket.limit - bucket.used)
+      : bucket.used);
+  return formatBucketNumber(value, bucket.unit);
 }
 
 function formatBucketNumber(value: number, unit: string): string {
