@@ -30,6 +30,7 @@ export function AccountFields({
   const isCliProvider = CLI_PROVIDERS.includes(form.provider);
   const isAwsProvider = form.provider === "aws";
   const isCopilotProvider = form.provider === "copilot";
+  const isOpenRouterProvider = form.provider === "openrouter";
 
   return (
     <>
@@ -56,6 +57,9 @@ export function AccountFields({
           <p className="form-help">
             Secrets are stored only in your operating system keyring. Custom
             provider endpoints and plaintext credential storage are disabled.
+            {isOpenRouterProvider
+              ? " OpenRouter account-level remaining credits require a Management key; a regular inference key may be rejected by the credits API."
+              : ""}
           </p>
           <label>
             {isCliProvider ? "API Key (optional)" : "API Key"}

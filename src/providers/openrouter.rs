@@ -1,6 +1,6 @@
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 
 use crate::models::{AccountConfig, QuotaSnapshot, UsageSnapshot};
 
@@ -13,12 +13,18 @@ const DEFAULT_ENDPOINT: &str = "https://openrouter.ai/api/v1/credits";
 pub(crate) async fn fetch(http: &Client, account: &AccountConfig) -> Result<UsageSnapshot> {
     let token = require_token(account)?;
     let url = endpoint(account, "BURNRATE_OPENROUTER_CREDITS_URL", DEFAULT_ENDPOINT)?;
-    let value: serde_json::Value = http
+    let response = http
         .get(url)
         .bearer_auth(token)
         .send()
         .await
-        .context("failed to fetch OpenRouter credits")?
+        .context("failed to fetch OpenRouter credits")?;
+    if response.status() == StatusCode::FORBIDDEN {
+        return Err(anyhow!(
+            "OpenRouter account credits require a Management key; the credits API rejected this key with 403 Forbidden"
+        ));
+    }
+    let value: serde_json::Value = response
         .error_for_status()
         .context("OpenRouter credits request failed")?
         .json()
@@ -161,5 +167,23 @@ mod tests {
         let quota = snapshot.quota.unwrap();
         assert_eq!(quota.remaining, Some(21.0));
         assert_eq!(quota.unit, "USD");
+    }
+
+    #[tokio::test]
+    async fn explains_management_key_requirement_on_forbidden() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/"))
+            .and(header("authorization", "Bearer sk-test"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&server)
+            .await;
+
+        let mut account = account();
+        account.endpoint_override = Some(server.uri());
+        let error = fetch(&Client::new(), &account).await.unwrap_err().to_string();
+
+        assert!(error.contains("Management key"));
+        assert!(error.contains("403"));
     }
 }
