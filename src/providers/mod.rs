@@ -58,6 +58,15 @@ impl ProviderClient {
     }
 
     pub(crate) async fn refresh_account(&self, account: &AccountConfig) -> UsageSnapshot {
+        if account.auto_detected {
+            return error_snapshot(
+                account,
+                anyhow!(
+                    "legacy auto-detected system accounts are disabled; remove this account and add it explicitly"
+                ),
+            );
+        }
+
         let now = now_millis();
         if let Some(snapshot) = self.cached_before_fetch(account, now) {
             return snapshot;
@@ -1155,6 +1164,18 @@ mod tests {
         let cache = provider.cache.lock().expect("provider cache lock");
         assert_eq!(cache.len(), 1);
         assert!(cache.keys().all(|key| key.starts_with("openrouter:")));
+    }
+
+    #[tokio::test]
+    async fn refresh_account_rejects_legacy_auto_detected_accounts() {
+        let mut account = account();
+        account.auto_detected = true;
+        account.credential_path = Some("/definitely/should/not/read".to_string());
+
+        let snapshot = ProviderClient::new().refresh_account(&account).await;
+
+        assert_eq!(snapshot.status, SnapshotStatus::Error);
+        assert!(snapshot.message.unwrap().contains("auto-detected"));
     }
 
     #[tokio::test]
