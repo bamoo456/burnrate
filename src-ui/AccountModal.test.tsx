@@ -80,14 +80,16 @@ test("manual CLI path keeps the optional key field and Back re-picks cleanly", a
   expect(props.onSave).not.toHaveBeenCalled();
 });
 
-test("OpenRouter skips the method step and saves the typed input", async () => {
+test("OpenRouter uses keyring-only fields and saves the typed input", async () => {
   const user = userEvent.setup();
   const props = renderModal();
 
   await user.click(screen.getByRole("menuitem", { name: "OpenRouter" }));
-  expect(screen.getByLabelText("Endpoint")).toHaveValue(
-    "https://openrouter.ai/api/v1/credits",
-  );
+  expect(screen.queryByLabelText("Endpoint")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Plaintext" })).not.toBeInTheDocument();
+  expect(
+    screen.getByText(/Secrets are stored only in your operating system keyring/),
+  ).toBeInTheDocument();
 
   await user.clear(screen.getByLabelText("Label"));
   await user.type(screen.getByLabelText("Label"), "OpenRouter Team");
@@ -99,6 +101,8 @@ test("OpenRouter skips the method step and saves the typed input", async () => {
       provider: "openrouter",
       label: "OpenRouter Team",
       secret: "sk-or-test",
+      secretStorage: "keyring",
+      endpointOverride: null,
     }) as AccountInput,
   );
   expect(props.onClose).toHaveBeenCalledOnce();
@@ -161,7 +165,7 @@ test("AWS category rows edit filters in place", async () => {
   });
 });
 
-test("Copilot tile shows the plan selector; custom plan reveals the limit", async () => {
+test("Copilot requires an explicit token; custom plan reveals the limit", async () => {
   const user = userEvent.setup();
   const onSave = vi.fn().mockResolvedValue(undefined);
   renderModal({ onSave });
@@ -169,7 +173,9 @@ test("Copilot tile shows the plan selector; custom plan reveals the limit", asyn
   await user.click(screen.getByRole("menuitem", { name: "GitHub Copilot" }));
   expect(screen.getByLabelText("Plan")).toHaveValue("");
   expect(screen.queryByLabelText("Endpoint")).not.toBeInTheDocument();
+  expect(screen.getByLabelText("GitHub token")).toBeRequired();
 
+  await user.type(screen.getByLabelText("GitHub token"), "ghp_test");
   await user.selectOptions(screen.getByLabelText("Plan"), "custom");
   await user.type(screen.getByLabelText("Monthly premium requests"), "2500");
   // Leaving custom clears the stale limit so the plan's own allowance applies.
@@ -178,6 +184,8 @@ test("Copilot tile shows the plan selector; custom plan reveals the limit", asyn
 
   expect(onSave.mock.calls[0][0]).toMatchObject({
     provider: "copilot",
+    secret: "ghp_test",
+    secretStorage: "keyring",
     copilotPlan: "enterprise",
     copilotCustomLimit: null,
   });
@@ -203,14 +211,22 @@ test("edit mode opens on prefilled fields with the provider fixed", async () => 
 
   await user.click(screen.getByRole("button", { name: "Save" }));
   expect(props.onSave).toHaveBeenCalledWith(
-    expect.objectContaining({ id: "acct-1", secret: "" }) as AccountInput,
+    expect.objectContaining({
+      id: "acct-1",
+      secret: "",
+      secretStorage: "keyring",
+      endpointOverride: null,
+    }) as AccountInput,
   );
 });
 
 test("edit mode offers Sign in again only when a re-auth is legitimate", async () => {
   const user = userEvent.setup();
   const props = renderModal({
-    mode: { kind: "edit", account: account() },
+    mode: {
+      kind: "edit",
+      account: account({ configDir: "/managed/claude/acct-1", autoDetected: false }),
+    },
   });
 
   await user.click(screen.getByRole("button", { name: /Sign in again/ }));
