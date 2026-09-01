@@ -23,10 +23,13 @@ import {
   type WindowDragSnapshot,
 } from "./api";
 import {
+  balanceBuckets,
+  balanceUnavailableReason,
   bucketMeterLabel,
   bucketPercent,
   displayBuckets,
   formatAgo,
+  formatBalance,
   formatLimit,
   formatReset,
   hasAwsCostData,
@@ -50,6 +53,7 @@ const providerLabels = {
   codex: "Codex",
   aws: "AWS",
   openrouter: "OpenRouter",
+  "opencode-go": "OpenCode Go",
   runpod: "Runpod",
   copilot: "Copilot",
 } as const;
@@ -382,6 +386,8 @@ function TraySnapshot({
   expanded: boolean;
   onToggle: () => void;
 }) {
+  const balances = balanceBuckets(snapshot);
+  const balanceNote = balanceUnavailableReason(snapshot);
   const buckets = displayBuckets(snapshot);
   const plan = snapshot.subscription?.planLabel;
 
@@ -430,11 +436,30 @@ function TraySnapshot({
         </div>
       ) : null}
 
-      <div className="bucket-list">
-        {buckets.map((bucket) => (
-          <BucketRow key={bucket.id} bucket={bucket} />
-        ))}
-      </div>
+      {balances.length > 0 || balanceNote ? (
+        <div className="bucket-list" aria-label="Credits and balance">
+          {balances.map((bucket) => (
+            <BalanceRow key={bucket.id} bucket={bucket} />
+          ))}
+          {balanceNote ? (
+            <div className="bucket-row">
+              <div className="bucket-meta">
+                <span>Balance</span>
+                <strong>Unavailable</strong>
+              </div>
+              <small>{balanceNote}</small>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {buckets.length > 0 ? (
+        <div className="bucket-list" aria-label="Usage limits">
+          {buckets.map((bucket) => (
+            <BucketRow key={bucket.id} bucket={bucket} />
+          ))}
+        </div>
+      ) : null}
 
       {localUsage ? (
         <LocalUsageSummary usage={localUsage} multiAccount={multiAccount} />
@@ -448,6 +473,18 @@ function TraySnapshot({
         <p className="tray-message">{snapshot.message}</p>
       ) : null}
     </article>
+  );
+}
+
+function BalanceRow({ bucket }: { bucket: UsageBucketSnapshot }) {
+  return (
+    <div className={`bucket-row ${bucket.status}`}>
+      <div className="bucket-meta">
+        <span>{bucket.label}</span>
+        <strong>{formatBalance(bucket)}</strong>
+      </div>
+      <small>Available balance</small>
+    </div>
   );
 }
 
