@@ -1,5 +1,7 @@
 import type { UsageBucketSnapshot, UsageSnapshot } from "./types";
 
+export type DashboardWindow = "5-hour" | "weekly" | "monthly";
+
 export function primaryBucket(
   snapshot: UsageSnapshot,
 ): UsageBucketSnapshot | null {
@@ -39,6 +41,94 @@ export function displayBuckets(snapshot: UsageSnapshot): UsageBucketSnapshot[] {
   if (balanceBuckets(snapshot).length > 0) return [];
   const fallback = bucketFromQuota(snapshot);
   return fallback && hasBucketValue(fallback) ? [fallback] : [];
+}
+
+/** Resolve provider-specific bucket ids into the dashboard's fixed columns. */
+export function dashboardWindowBucket(
+  snapshot: UsageSnapshot,
+  window: DashboardWindow,
+): UsageBucketSnapshot | null {
+  const candidates = displayBuckets(snapshot)
+    .map((bucket) => ({
+      bucket,
+      score: dashboardWindowScore(snapshot, bucket, window),
+    }))
+    .filter(({ score }) => score > 0)
+    .sort((a, b) => b.score - a.score);
+  return candidates[0]?.bucket ?? null;
+}
+
+/** Usage metrics that do not fit Balance / 5-hour / Weekly / Monthly. */
+export function secondaryUsageBuckets(
+  snapshot: UsageSnapshot,
+): UsageBucketSnapshot[] {
+  const primaryIds = new Set(
+    (["5-hour", "weekly", "monthly"] as const)
+      .map((window) => dashboardWindowBucket(snapshot, window)?.id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  return displayBuckets(snapshot).filter((bucket) => !primaryIds.has(bucket.id));
+}
+
+/** Earliest valid future reset among the normalized dashboard usage windows. */
+export function nextResetBucket(snapshot: UsageSnapshot): UsageBucketSnapshot | null {
+  const now = Date.now();
+  const buckets = (["5-hour", "weekly", "monthly"] as const)
+    .map((window) => dashboardWindowBucket(snapshot, window))
+    .filter((bucket): bucket is UsageBucketSnapshot => Boolean(bucket?.resetAt))
+    .map((bucket) => ({ bucket, time: new Date(bucket.resetAt!).getTime() }))
+    .filter(({ time }) => Number.isFinite(time) && time >= now)
+    .sort((a, b) => a.time - b.time);
+  return buckets[0]?.bucket ?? null;
+}
+
+function dashboardWindowScore(
+  snapshot: UsageSnapshot,
+  bucket: UsageBucketSnapshot,
+  window: DashboardWindow,
+): number {
+  const id = normalizeBucketText(bucket.id);
+  const label = normalizeBucketText(bucket.label);
+  const bucketWindow = normalizeBucketText(bucket.window ?? "");
+  const raw = `${id} ${label} ${bucketWindow}`;
+  let score = 0;
+
+  if (window === "5-hour") {
+    if (id === "5 hour") score += 100;
+    if (label === "5 hour") score += 80;
+    if (bucketWindow === "5 hour") score += 50;
+    if (
+      snapshot.provider === "opencode-go" &&
+      (id === "rolling" || label.includes("rolling"))
+    ) {
+      score += 100;
+    }
+    if (raw.includes("five hour")) score += 30;
+    return score;
+  }
+
+  if (window === "weekly") {
+    if (id === "weekly") score += 100;
+    if (label === "weekly") score += 80;
+    if (bucketWindow === "weekly") score += 50;
+    if (raw.includes("week")) score += 20;
+    if (bucket.limit !== null) score += 5;
+    return score;
+  }
+
+  if (["monthly", "aws mtd", "copilot premium mtd"].includes(id)) {
+    score += 100;
+  }
+  if (label === "monthly" || label.includes("month to date")) score += 80;
+  if (bucketWindow === "monthly" || bucketWindow === "month to date") score += 50;
+  if (raw.includes("month")) score += 20;
+  // Prefer an actual quota/budget total over attribution-only category rows.
+  if (bucket.limit !== null || bucket.remaining !== null) score += 20;
+  return score;
+}
+
+function normalizeBucketText(value: string): string {
+  return value.toLowerCase().replace(/[_-]+/g, " ").trim();
 }
 
 /**
@@ -113,6 +203,26 @@ export function formatLimit(bucket: UsageBucketSnapshot): string {
       ? ""
       : ` / ${formatBucketNumber(bucket.limit, bucket.unit)}`;
   return `${value}${limit}`;
+}
+
+/** Compact, scan-friendly value for the fixed dashboard metric columns. */
+export function formatDashboardMetric(bucket: UsageBucketSnapshot): string {
+  const value = bucket.remaining ?? bucket.used;
+  const suffix = bucket.remaining === null ? "used" : "left";
+
+  if (bucket.unit === "%") {
+    return `${formatNumber(value)}% ${suffix}`;
+  }
+  if (bucket.unit === "tokens") {
+    return `${formatTokenCount(value)} ${suffix}`;
+  }
+  if (bucket.unit === "USD/hr") {
+    return `${formatUsd(value)}/hr`;
+  }
+  if (bucket.unit === "USD") {
+    return `${formatUsd(value)} ${suffix}`;
+  }
+  return `${formatNumber(value)} ${bucket.unit} ${suffix}`;
 }
 
 /** Numeric spendable balance only — never append the historical amount

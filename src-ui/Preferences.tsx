@@ -8,18 +8,8 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { AccountModal, type AccountModalMode } from "./AccountModal";
-import {
-  balanceBuckets,
-  balanceUnavailableReason,
-  bucketMeterLabel,
-  bucketPercent,
-  displayBuckets,
-  formatAgo,
-  formatBalance,
-  formatLimit,
-  formatReset,
-  hasAwsCostData,
-} from "./format";
+import { DashboardGrid } from "./DashboardGrid";
+import { formatAgo } from "./format";
 import { ProviderLogo } from "./ProviderLogo";
 import { SortableList } from "./SortableList";
 import { UpdateBanner } from "./UpdateBanner";
@@ -30,7 +20,6 @@ import type {
   ProviderKind,
   SnapshotStatus,
   UpdateChannel,
-  UsageBucketSnapshot,
   UsageSnapshot,
 } from "./types";
 import type { UpdaterState } from "./useUpdater";
@@ -210,25 +199,22 @@ export function Preferences({
           {accounts.length === 0 && snapshots.length === 0 && !busy ? (
             <FirstRunPanel onAdd={() => setModal({ kind: "add" })} />
           ) : (
-            <section className="prefs-usage">
+            <section className="prefs-usage dashboard-section">
               <SectionTitle
-                title="Live usage"
+                title="Accounts at a glance"
                 detail={
                   snapshots.length > 0
-                    ? `${snapshots.length} account${snapshots.length === 1 ? "" : "s"}`
+                    ? `${snapshots.length} live account${snapshots.length === 1 ? "" : "s"}`
                     : "Idle"
                 }
               />
-              <div className="usage-list">
-                {snapshots.map((snapshot) => (
-                  <UsageRow key={snapshot.accountId} snapshot={snapshot} />
-                ))}
-                {!busy && snapshots.length === 0 ? (
-                  <div className="empty-state">
-                    Add an account to start monitoring quota.
-                  </div>
-                ) : null}
-              </div>
+              {snapshots.length > 0 ? (
+                <DashboardGrid snapshots={snapshots} />
+              ) : !busy ? (
+                <div className="empty-state">
+                  Add an account to start monitoring quota.
+                </div>
+              ) : null}
             </section>
           )}
 
@@ -512,97 +498,6 @@ function AccountButton({
           </button>
         </span>
       )}
-    </div>
-  );
-}
-
-function UsageRow({ snapshot }: { snapshot: UsageSnapshot }) {
-  const balances = balanceBuckets(snapshot);
-  const balanceNote = balanceUnavailableReason(snapshot);
-  const buckets = displayBuckets(snapshot);
-  const plan = snapshot.subscription?.planLabel;
-
-  return (
-    <article className={`usage-row ${snapshot.status}`}>
-      <div className="usage-head">
-        <div className="usage-provider">
-          <ProviderLogo provider={snapshot.provider} size="sm" />
-          <span>
-            <strong>{snapshot.label}</strong>
-            <small>
-              {providerLabels[snapshot.provider]}
-              {plan ? ` · ${plan}` : ""}
-            </small>
-            {snapshot.email ? (
-              <small className="account-email">{snapshot.email}</small>
-            ) : null}
-            <small className="snapshot-freshness">
-              {hasAwsCostData(snapshot) ? "AWS cost data" : "Updated"} ·{" "}
-              {formatAgo(snapshot.fetchedAt)}
-            </small>
-          </span>
-        </div>
-        <StatusBadge status={snapshot.status} />
-      </div>
-      {balances.length > 0 || balanceNote ? (
-        <div className="usage-buckets" aria-label="Credits and balance">
-          {balances.map((bucket) => (
-            <BalanceLine key={bucket.id} bucket={bucket} />
-          ))}
-          {balanceNote ? (
-            <div className="bucket-line">
-              <div>
-                <span>Balance</span>
-                <strong>Unavailable</strong>
-              </div>
-              <small>{balanceNote}</small>
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-      {buckets.length > 0 ? (
-        <div className="usage-buckets" aria-label="Usage limits">
-          {buckets.map((bucket) => (
-            <BucketLine key={bucket.id} bucket={bucket} />
-          ))}
-        </div>
-      ) : balances.length === 0 && !balanceNote ? (
-        <p className="snapshot-message">
-          {snapshot.message ?? "Usage unavailable."}
-        </p>
-      ) : null}
-      {snapshot.message ? (
-        <p className="snapshot-message">{snapshot.message}</p>
-      ) : null}
-    </article>
-  );
-}
-
-function BalanceLine({ bucket }: { bucket: UsageBucketSnapshot }) {
-  return (
-    <div className={`bucket-line ${bucket.status}`}>
-      <div>
-        <span>{bucket.label}</span>
-        <strong>{formatBalance(bucket)}</strong>
-      </div>
-      <small>Available balance</small>
-    </div>
-  );
-}
-
-function BucketLine({ bucket }: { bucket: UsageBucketSnapshot }) {
-  return (
-    <div className={`bucket-line ${bucket.status}`}>
-      <div>
-        <span>{bucket.label}</span>
-        <strong>
-          {formatLimit(bucket)} {bucket.unit}
-        </strong>
-      </div>
-      <div className="meter" aria-label={bucketMeterLabel(bucket)}>
-        <span style={{ width: `${bucketPercent(bucket)}%` }} />
-      </div>
-      <small>{formatReset(bucket.resetAt)}</small>
     </div>
   );
 }

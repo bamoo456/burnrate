@@ -1,0 +1,232 @@
+.dashboard-table-wrap {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.dashboard-table {
+  width: 100%;
+  min-width: 920px;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.dashboard-table th,
+.dashboard-table td {
+  padding: 10px;
+  text-align: left;
+  vertical-align: top;
+  border-right: 1px solid var(--hairline);
+  border-bottom: 1px solid var(--hairline);
+}
+
+.dashboard-table th:last-child,
+.dashboard-table td:last-child {
+  border-right: 0;
+}
+
+.dashboard-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.dashboard-table thead th {
+  color: var(--fg-soft);
+  background: var(--surface);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.dashboard-table th:first-child {
+  width: 250px;
+}
+
+.dashboard-table th:nth-child(2) {
+  width: 120px;
+}
+
+.dashboard-table th:nth-child(3),
+.dashboard-table th:nth-child(4),
+.dashboard-table th:nth-child(5) {
+  width: 135px;
+}
+
+.dashboard-table th:nth-child(6) {
+  width: 115px;
+}
+
+.dashboard-table th:nth-child(7) {
+  width: 105px;
+}
+
+.dashboard-table tbody tr.warning td {
+  background: color-mix(in srgb, var(--warn) 4%, var(--surface-soft));
+}
+
+.dashboard-table tbody tr.exhausted td,
+.dashboard-table tbody tr.error td {
+  background: color-mix(in srgb, var(--crit) 4%, var(--surface-soft));
+}
+
+.dashboard-account {
+  min-width: 0;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.dashboard-account > div {
+  min-width: 0;
+}
+
+.dashboard-account strong,
+.dashboard-account small {
+  display: block;
+}
+
+.dashboard-account > div > strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 720;
+}
+
+.dashboard-account small {
+  color: var(--fg-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-extras {
+  margin-top: 5px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 7px;
+  color: var(--fg-faint);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.dashboard-extras span {
+  white-space: nowrap;
+}
+
+.dashboard-extras b {
+  color: var(--fg-soft);
+  font-weight: 650;
+}
+
+.dashboard-extras small {
+  display: inline;
+  color: inherit;
+  font-size: inherit;
+  overflow: visible;
+  white-space: inherit;
+}
+
+.dashboard-message {
+  margin-top: 5px;
+  color: var(--fg-soft) !important;
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  overflow-wrap: anywhere;
+  line-height: 1.3;
+}
+
+.dashboard-table tr.error .dashboard-message,
+.dashboard-table tr.exhausted .dashboard-message {
+  color: var(--crit) !important;
+}
+
+.dashboard-table tr.stale .dashboard-message,
+.dashboard-table tr.warning .dashboard-message {
+  color: var(--warn) !important;
+}
+
+.dashboard-metric {
+  min-height: 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 5px;
+}
+
+.dashboard-metric > strong {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.2;
+}
+
+.dashboard-metric > small {
+  color: var(--fg-soft);
+  font-size: 10px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dashboard-metric.empty {
+  justify-content: center;
+  color: var(--fg-faint);
+}
+
+.dashboard-metric.empty > strong {
+  color: var(--fg-faint);
+  font-weight: 500;
+}
+
+.dashboard-metric.unavailable > strong {
+  color: var(--fg-soft);
+  font-size: 11px;
+}
+
+.dashboard-meter {
+  width: 100%;
+  height: 5px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--track);
+}
+
+.dashboard-meter span {
+  display: block;
+  min-width: 3px;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--meter-ok);
+}
+
+.dashboard-metric.warning .dashboard-meter span {
+  background: var(--meter-warn);
+}
+
+.dashboard-metric.exhausted .dashboard-meter span,
+.dashboard-metric.error .dashboard-meter span {
+  background: var(--meter-crit);
+}
+
+.dashboard-status-cell {
+  vertical-align: middle !important;
+}
+
+.dashboard-status-cell .status {
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .dashboard-table-wrap {
+    margin-right: -1px;
+  }
+}
