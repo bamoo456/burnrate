@@ -170,7 +170,9 @@ test("maps AWS month-to-date into Monthly and keeps category details visible", (
 
   const row = screen.getByRole("row", { name: /AWS/ });
   expect(within(row).getByText("$35.75 left")).toBeInTheDocument();
-  expect(within(row).getByText(/Bedrock · \$48\.50 used/)).toBeInTheDocument();
-  expect(within(row).getByText(/EC2 compute · \$72\.10 used/)).toBeInTheDocument();
+  expect(within(row).getByText("Bedrock")).toBeInTheDocument();
+  expect(within(row).getByText("$48.50 used")).toBeInTheDocument();
+  expect(within(row).getByText("EC2 compute")).toBeInTheDocument();
+  expect(within(row).getByText("$72.10 used")).toBeInTheDocument();
   expect(within(row).getByText("Warning")).toBeInTheDocument();
 });
