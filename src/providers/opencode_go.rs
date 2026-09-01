@@ -2,9 +2,7 @@ use anyhow::{Context, Result, anyhow};
 use chrono::{DateTime, Utc};
 use reqwest::Client;
 
-use crate::models::{
-    AccountConfig, QuotaSnapshot, SnapshotStatus, UsageBucketSnapshot, UsageSnapshot,
-};
+use crate::models::{AccountConfig, SnapshotStatus, UsageBucketSnapshot, UsageSnapshot};
 
 use super::{endpoint, overall_status, primary_quota, require_token, status_from_remaining};
 
