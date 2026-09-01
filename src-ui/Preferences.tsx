@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { AccountModal, type AccountModalMode } from "./AccountModal";
+import { DashboardGrid } from "./DashboardGrid";
 import {
   balanceBuckets,
   balanceUnavailableReason,
@@ -210,25 +211,22 @@ export function Preferences({
           {accounts.length === 0 && snapshots.length === 0 && !busy ? (
             <FirstRunPanel onAdd={() => setModal({ kind: "add" })} />
           ) : (
-            <section className="prefs-usage">
+            <section className="prefs-usage dashboard-section">
               <SectionTitle
-                title="Live usage"
+                title="Accounts at a glance"
                 detail={
                   snapshots.length > 0
-                    ? `${snapshots.length} account${snapshots.length === 1 ? "" : "s"}`
+                    ? `${snapshots.length} live account${snapshots.length === 1 ? "" : "s"}`
                     : "Idle"
                 }
               />
-              <div className="usage-list">
-                {snapshots.map((snapshot) => (
-                  <UsageRow key={snapshot.accountId} snapshot={snapshot} />
-                ))}
-                {!busy && snapshots.length === 0 ? (
-                  <div className="empty-state">
-                    Add an account to start monitoring quota.
-                  </div>
-                ) : null}
-              </div>
+              {snapshots.length > 0 ? (
+                <DashboardGrid snapshots={snapshots} />
+              ) : !busy ? (
+                <div className="empty-state">
+                  Add an account to start monitoring quota.
+                </div>
+              ) : null}
             </section>
           )}
 
