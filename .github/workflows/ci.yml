@@ -28,12 +28,6 @@ jobs:
             patchelf
       - run: npm ci
       - run: npm run build
-      - name: Upload generated frontend bundle
-        uses: actions/upload-artifact@v4
-        with:
-          name: generated-dist
-          path: dist/
-          include-hidden-files: true
       - name: Verify bundled frontend assets are committed
         run: git diff --exit-code -- dist
       - run: npm test
