@@ -113,7 +113,8 @@ function AccountIdentity({ snapshot }: { snapshot: UsageSnapshot }) {
           <div className="dashboard-extras" aria-label="Other usage">
             {extras.map((bucket) => (
               <span key={bucket.id}>
-                {bucket.label} · {formatDashboardMetric(bucket)}
+                <b>{bucket.label}</b>
+                <small> · {formatDashboardMetric(bucket)}</small>
               </span>
             ))}
           </div>
