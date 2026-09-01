@@ -1,5 +1,7 @@
 import type { UsageBucketSnapshot, UsageSnapshot } from "./types";
 
+export type DashboardWindow = "5-hour" | "weekly" | "monthly";
+
 export function primaryBucket(
   snapshot: UsageSnapshot,
 ): UsageBucketSnapshot | null {
@@ -39,6 +41,61 @@ export function displayBuckets(snapshot: UsageSnapshot): UsageBucketSnapshot[] {
   if (balanceBuckets(snapshot).length > 0) return [];
   const fallback = bucketFromQuota(snapshot);
   return fallback && hasBucketValue(fallback) ? [fallback] : [];
+}
+
+/** Resolve provider-specific bucket ids into the dashboard's fixed columns. */
+export function dashboardWindowBucket(
+  snapshot: UsageSnapshot,
+  window: DashboardWindow,
+): UsageBucketSnapshot | null {
+  return (
+    displayBuckets(snapshot).find((bucket) => bucketMatchesWindow(bucket, window)) ??
+    null
+  );
+}
+
+/** Usage metrics that do not fit Balance / 5-hour / Weekly / Monthly. */
+export function secondaryUsageBuckets(
+  snapshot: UsageSnapshot,
+): UsageBucketSnapshot[] {
+  const primaryIds = new Set(
+    (["5-hour", "weekly", "monthly"] as const)
+      .map((window) => dashboardWindowBucket(snapshot, window)?.id)
+      .filter((id): id is string => Boolean(id)),
+  );
+  return displayBuckets(snapshot).filter((bucket) => !primaryIds.has(bucket.id));
+}
+
+/** Earliest valid reset among the normalized dashboard usage windows. */
+export function nextResetBucket(snapshot: UsageSnapshot): UsageBucketSnapshot | null {
+  const buckets = (["5-hour", "weekly", "monthly"] as const)
+    .map((window) => dashboardWindowBucket(snapshot, window))
+    .filter((bucket): bucket is UsageBucketSnapshot => Boolean(bucket?.resetAt))
+    .map((bucket) => ({ bucket, time: new Date(bucket.resetAt!).getTime() }))
+    .filter(({ time }) => Number.isFinite(time))
+    .sort((a, b) => a.time - b.time);
+  return buckets[0]?.bucket ?? null;
+}
+
+function bucketMatchesWindow(
+  bucket: UsageBucketSnapshot,
+  window: DashboardWindow,
+): boolean {
+  const raw = `${bucket.id} ${bucket.label} ${bucket.window ?? ""}`
+    .toLowerCase()
+    .replace(/[_-]+/g, " ");
+
+  if (window === "5-hour") {
+    return (
+      raw.includes("5 hour") ||
+      raw.includes("five hour") ||
+      raw.includes("rolling")
+    );
+  }
+  if (window === "weekly") {
+    return raw.includes("week");
+  }
+  return raw.includes("month") || raw.includes("month to date");
 }
 
 /**
@@ -113,6 +170,26 @@ export function formatLimit(bucket: UsageBucketSnapshot): string {
       ? ""
       : ` / ${formatBucketNumber(bucket.limit, bucket.unit)}`;
   return `${value}${limit}`;
+}
+
+/** Compact, scan-friendly value for the fixed dashboard metric columns. */
+export function formatDashboardMetric(bucket: UsageBucketSnapshot): string {
+  const value = bucket.remaining ?? bucket.used;
+  const suffix = bucket.remaining === null ? "used" : "left";
+
+  if (bucket.unit === "%") {
+    return `${formatNumber(value)}% ${suffix}`;
+  }
+  if (bucket.unit === "tokens") {
+    return `${formatTokenCount(value)} ${suffix}`;
+  }
+  if (bucket.unit === "USD/hr") {
+    return `${formatUsd(value)}/hr`;
+  }
+  if (bucket.unit === "USD") {
+    return `${formatUsd(value)} ${suffix}`;
+  }
+  return `${formatNumber(value)} ${bucket.unit} ${suffix}`;
 }
 
 /** Numeric spendable balance only — never append the historical amount
