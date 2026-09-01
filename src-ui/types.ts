@@ -2,6 +2,7 @@ export type ProviderKind =
   | "claude-code"
   | "codex"
   | "openrouter"
+  | "open-code-go"
   | "runpod"
   | "aws"
   | "copilot";
@@ -187,37 +188,27 @@ export interface LocalProjectCost {
   costUsd: number;
 }
 
-/** Available update returned by the `check_for_updates` command. */
-export interface UpdateInfo {
-  version: string;
-  currentVersion: string;
-  body: string | null;
-  date: string | null;
-}
-
-export interface DashboardState {
-  accounts: AccountView[];
-  snapshots: UsageSnapshot[];
-  traySummary: TraySummary;
-  settings: AppSettings;
-}
-
-/** Streamed sign-in progress (`burnrate-login-progress`). */
 export interface LoginProgress {
   id: string;
-  line: string;
-  url?: string | null;
-  needsCode?: boolean;
+  provider: ProviderKind;
+  stage: string;
+  message: string;
+  authUrl?: string | null;
+  needsInput?: boolean;
 }
 
-/** Successful sign-in (`burnrate-login-complete`). */
 export interface LoginComplete {
   id: string;
   account: AccountView;
 }
 
-/** Failed or cancelled sign-in (`burnrate-login-failed`). */
 export interface LoginFailed {
   id: string;
   error: string;
+}
+
+export interface UpdateInfo {
+  version: string;
+  body?: string | null;
+  date?: string | null;
 }
