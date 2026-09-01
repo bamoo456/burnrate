@@ -1,16 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   closePreferences,
-  detectAccounts,
   getAppVersion,
   guardedFetch,
   hideTray,
   isStale,
-  localUsage as fetchLocalUsage,
   logoutAccount,
   markFetched,
   onDashboardUpdated,
-  onLocalUsageUpdated,
   onRefreshRequested,
   onSettingsUpdated,
   openPreferences,
@@ -26,19 +23,13 @@ import { useUpdater } from "./useUpdater";
 import { LoginModal } from "./LoginModal";
 import { UpdateDialog } from "./UpdateDialog";
 import { Preferences } from "./Preferences";
-import {
-  OPENROUTER_DEFAULT_ENDPOINT,
-  RUNPOD_DEFAULT_ENDPOINT,
-  formFromAccount,
-  providerLabels,
-} from "./constants";
+import { formFromAccount, providerLabels } from "./constants";
 import { TrayPanel } from "./TrayPanel";
 import type {
   AccountInput,
   AccountView,
   AppSettings,
   DashboardState,
-  LocalUsageReport,
   ProviderKind,
   UpdateChannel,
   UsageSnapshot,
@@ -58,8 +49,6 @@ export function App() {
   const [snapshots, setSnapshots] = useState<UsageSnapshot[]>(
     () => readCachedDashboard()?.dashboard.snapshots ?? [],
   );
-  const [localUsageReport, setLocalUsageReport] =
-    useState<LocalUsageReport | null>(null);
   // Spinner only on a true cold start (no cached data to show).
   const [busy, setBusy] = useState(() => readCachedDashboard() === null);
   const [error, setError] = useState<string | null>(null);
@@ -166,37 +155,6 @@ export function App() {
     };
   }, []);
 
-  // Local insights hydrate independently of the quota dashboard: fetch once on
-  // mount (cheap when the backend has a cached report) and mirror the
-  // post-refresh broadcast thereafter. Never blocks quota rendering.
-  useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    let disposed = false;
-    void fetchLocalUsage()
-      .then((report) => {
-        if (!disposed) {
-          setLocalUsageReport(report);
-        }
-      })
-      .catch(() => {
-        // Insights are auxiliary; a failed hydrate just leaves the section in
-        // its collecting state until the next broadcast.
-      });
-    void onLocalUsageUpdated((report) => {
-      setLocalUsageReport(report);
-    }).then((unlisten) => {
-      if (disposed) {
-        unlisten();
-      } else {
-        cleanup = unlisten;
-      }
-    });
-    return () => {
-      disposed = true;
-      cleanup?.();
-    };
-  }, []);
-
   const accounts = state?.accounts ?? [];
   const summary = useMemo(
     () => summaryFromBackend(state?.traySummary, snapshots),
@@ -206,16 +164,19 @@ export function App() {
     hideFromDock: state?.settings?.hideFromDock ?? true,
     updateChannel: state?.settings?.updateChannel ?? "stable",
     trayScale: state?.settings?.trayScale ?? TRAY_MAX_SCALE,
-    localInsights: state?.settings?.localInsights ?? true,
+    // This fork is account-managed-only. Keep the legacy field false so a save
+    // also migrates older upstream settings away from local session scanning.
+    localInsights: false,
   };
 
   async function updateSettings(next: AppSettings) {
     const previousSettings = settings;
+    const hardened = { ...next, localInsights: false };
     setState((previous) =>
-      previous ? { ...previous, settings: next } : previous,
+      previous ? { ...previous, settings: hardened } : previous,
     );
     try {
-      await saveSettings(next);
+      await saveSettings(hardened);
     } catch (err) {
       setState((previous) =>
         previous ? { ...previous, settings: previousSettings } : previous,
@@ -263,15 +224,16 @@ export function App() {
         cleanupDashboard = unlisten;
       }
     });
-    void onSettingsUpdated((settings) => {
+    void onSettingsUpdated((incoming) => {
+      const hardened = { ...incoming, localInsights: false };
       setState((previous) =>
         previous
-          ? { ...previous, settings }
+          ? { ...previous, settings: hardened }
           : {
               accounts: [],
               snapshots: [],
               traySummary: summaryFromBackend(undefined, []),
-              settings,
+              settings: hardened,
             },
       );
     }).then((unlisten) => {
@@ -362,15 +324,7 @@ export function App() {
     return () => {
       cancelAnimationFrame(frame);
     };
-  }, [
-    isTrayView,
-    accounts.length,
-    snapshots,
-    summary.label,
-    busy,
-    error,
-    localUsageReport,
-  ]);
+  }, [isTrayView, accounts.length, snapshots, summary.label, busy, error]);
 
   useLayoutEffect(() => {
     if (!isTrayView) {
@@ -415,8 +369,6 @@ export function App() {
       );
       panel.style.setProperty("--tray-scale", scale.toFixed(3));
       const scaledHeight = Math.ceil(height * scale);
-      // Keep the tray at the native menu-sized width. Height is adaptive and the
-      // internal list scrolls when scaled content exceeds the comfort cap.
       const width = TRAY_BASE_WIDTH;
       if (scaledHeight <= 0 || width <= 0) {
         return;
@@ -466,29 +418,18 @@ export function App() {
     accounts,
     summary.label,
     settings.trayScale,
-    localUsageReport,
   ]);
 
   /** Persist an account from the modal. Throws on failure so the modal can
    *  render the error inline and keep the user's input. */
   async function onSaveAccount(input: AccountInput): Promise<void> {
-    const endpoint = input.endpointOverride?.trim() || null;
-    const defaultEndpoint =
-      input.provider === "openrouter"
-        ? OPENROUTER_DEFAULT_ENDPOINT
-        : input.provider === "runpod"
-          ? RUNPOD_DEFAULT_ENDPOINT
-          : null;
-    const endpointOverride =
-      defaultEndpoint !== null && endpoint === defaultEndpoint
-        ? null
-        : endpoint;
     setBusy(true);
     setError(null);
     try {
       const accounts = await saveAccount({
         ...input,
-        endpointOverride,
+        endpointOverride: null,
+        secretStorage: "keyring",
         secret: input.provider === "aws" ? null : input.secret?.trim() || null,
         awsProfile: input.awsProfile?.trim() || null,
         awsRegion: input.awsRegion?.trim() || null,
@@ -538,18 +479,6 @@ export function App() {
     setError(null);
     try {
       await applyAccountChange(await removeAccount(id));
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function onDetect() {
-    setBusy(true);
-    setError(null);
-    try {
-      await applyAccountChange(await detectAccounts());
     } catch (err) {
       setError(String(err));
     } finally {
@@ -614,7 +543,7 @@ export function App() {
         snapshots={snapshots}
         busy={busy}
         error={error}
-        localUsage={settings.localInsights ? localUsageReport : null}
+        localUsage={null}
         updateAvailable={updater.state.available}
         onRefresh={() => void revalidate({ force: true })}
         onOpenPreferences={() => void openPreferences()}
@@ -633,7 +562,6 @@ export function App() {
         error={error}
         onSaveAccount={onSaveAccount}
         onToggleAccount={(account) => void onToggleAccount(account)}
-        onDetect={() => void onDetect()}
         onRefresh={() => void revalidate({ force: true })}
         onRemoveAccount={(id) => void onRemove(id)}
         onStartLogin={startLogin}
@@ -642,12 +570,6 @@ export function App() {
         settings={{
           trayScale: settings.trayScale,
           onTrayScaleChange: (scale) => void onTrayScaleChange(scale),
-        }}
-        insights={{
-          report: localUsageReport,
-          enabled: settings.localInsights,
-          onToggle: (enabled) =>
-            void updateSettings({ ...settings, localInsights: enabled }),
         }}
         updates={{
           channel: settings.updateChannel,

@@ -20,11 +20,6 @@ export const providerLabels: Record<ProviderKind, string> = {
   copilot: "GitHub Copilot",
 };
 
-export const providerDefaultEndpoints: Partial<Record<ProviderKind, string>> = {
-  openrouter: OPENROUTER_DEFAULT_ENDPOINT,
-  runpod: RUNPOD_DEFAULT_ENDPOINT,
-};
-
 /** GitHub Copilot plans and their monthly premium-request allowances
  *  (mirrors `CopilotPlan::monthly_limit` in src/models.rs). */
 export const COPILOT_PLANS: {
@@ -91,7 +86,7 @@ export const emptyForm: AccountInput = {
   provider: "openrouter",
   label: "OpenRouter",
   enabled: true,
-  endpointOverride: OPENROUTER_DEFAULT_ENDPOINT,
+  endpointOverride: null,
   secretStorage: "keyring",
   secret: "",
   awsProfile: null,
@@ -116,13 +111,14 @@ export const PROVIDERS: ProviderKind[] = [
 export const CLI_PROVIDERS: ProviderKind[] = ["claude-code", "codex"];
 
 /** Fresh form state for adding a `provider` account. Picking a provider always
- *  starts clean — a secret typed for one provider never carries to another. */
+ *  starts clean — a secret typed for one provider never carries to another.
+ *  Provider endpoints are fixed by the backend in production. */
 export function formForProvider(provider: ProviderKind): AccountInput {
   return {
     provider,
     label: providerLabels[provider],
     enabled: true,
-    endpointOverride: providerDefaultEndpoints[provider] ?? "",
+    endpointOverride: null,
     secretStorage: "keyring",
     secret: "",
     awsProfile: null,
@@ -135,18 +131,16 @@ export function formForProvider(provider: ProviderKind): AccountInput {
 }
 
 /** Form state prefilled from an existing account for editing. The secret is
- *  always blank — saving with it blank keeps the stored one. */
+ *  always blank — saving with it blank keeps the stored one. Legacy plaintext
+ *  storage and endpoint overrides are intentionally normalized away. */
 export function formFromAccount(account: AccountView): AccountInput {
   return {
     id: account.id,
     provider: account.provider,
     label: account.label,
     enabled: account.enabled,
-    endpointOverride:
-      account.endpointOverride ??
-      providerDefaultEndpoints[account.provider] ??
-      "",
-    secretStorage: account.secretStorage,
+    endpointOverride: null,
+    secretStorage: "keyring",
     secret: "",
     awsProfile: account.awsProfile ?? null,
     // Only AWS accounts get the region default — seeding it for other

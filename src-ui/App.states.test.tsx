@@ -107,7 +107,7 @@ beforeEach(() => {
     hideFromDock: false,
     updateChannel: "stable",
     trayScale: 1,
-    localInsights: true,
+    localInsights: false,
   });
   api.localUsage.mockResolvedValue({
     available: false,
@@ -383,9 +383,8 @@ test("escape dismisses the tray popover but not preferences", async () => {
   expect(api.closePreferences).not.toHaveBeenCalled();
 });
 
-test("a fresh install shows the guided first-run panel", async () => {
+test("a fresh install shows the guided account-managed first-run panel", async () => {
   api.guardedFetch.mockResolvedValue(dashboardState());
-  api.detectAccounts.mockResolvedValue([]);
 
   render(<App />);
 
@@ -400,11 +399,8 @@ test("a fresh install shows the guided first-run panel", async () => {
   ).toBeInTheDocument();
   fireEvent.click(screen.getByTitle("Close"));
 
-  // Disambiguated from the toolbar's detect icon by scoping to the panel.
-  fireEvent.click(
-    within(panel).getByRole("button", { name: /Detect accounts/ }),
-  );
-  await waitFor(() => expect(api.detectAccounts).toHaveBeenCalled());
+  expect(within(panel).queryByRole("button", { name: /Detect accounts/ })).not.toBeInTheDocument();
+  expect(api.detectAccounts).not.toHaveBeenCalled();
 });
 
 test("refreshes usage after saving an OpenRouter account", async () => {
@@ -453,6 +449,7 @@ test("refreshes usage after saving an OpenRouter account", async () => {
       label: "OpenRouter Team",
       provider: "openrouter",
       secret: "sk-openrouter",
+      secretStorage: "keyring",
     }),
   );
   expect(api.guardedFetch).toHaveBeenCalledWith({ force: true });
@@ -464,6 +461,7 @@ test("persists the chosen update channel", async () => {
     hideFromDock: true,
     updateChannel: "nightly",
     trayScale: 1,
+    localInsights: false,
   });
 
   render(<App />);
@@ -475,7 +473,7 @@ test("persists the chosen update channel", async () => {
 
   await waitFor(() =>
     expect(api.saveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ updateChannel: "nightly" }),
+      expect.objectContaining({ updateChannel: "nightly", localInsights: false }),
     ),
   );
 });
@@ -486,6 +484,7 @@ test("persists the tray content scale preference", async () => {
     hideFromDock: false,
     updateChannel: "stable",
     trayScale: 0.75,
+    localInsights: false,
   });
 
   render(<App />);
@@ -497,7 +496,7 @@ test("persists the tray content scale preference", async () => {
 
   await waitFor(() =>
     expect(api.saveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ trayScale: 0.75 }),
+      expect.objectContaining({ trayScale: 0.75, localInsights: false }),
     ),
   );
 });
@@ -671,7 +670,7 @@ test("renders tray summary branches and account disabled state", () => {
             autoDetected: false,
             credentialPath: null,
             endpointOverride: null,
-            secretStorage: "plaintext",
+            secretStorage: "keyring",
             hasSecret: true,
             email: null,
             configDir: null,
@@ -1195,19 +1194,14 @@ test("handles failed tray window moves", async () => {
   }
 });
 
-test("re-fetches and re-caches the dashboard after detecting accounts", async () => {
+test("does not expose system account detection from preferences", async () => {
   api.guardedFetch.mockResolvedValue(dashboardState());
-  api.detectAccounts.mockResolvedValue([]);
 
   render(<App />);
 
   await screen.findByRole("heading", { name: "Preferences" });
-  api.guardedFetch.mockClear(); // ignore the mount fetch
-  fireEvent.click(screen.getByTitle("Detect accounts"));
-
-  await waitFor(() =>
-    expect(api.guardedFetch).toHaveBeenCalledWith({ force: true }),
-  );
+  expect(screen.queryByTitle("Detect accounts")).not.toBeInTheDocument();
+  expect(api.detectAccounts).not.toHaveBeenCalled();
 });
 
 test("renders a tray snapshot from the quota fallback with an inline message", () => {
@@ -1394,7 +1388,7 @@ function dashboardState(
       hideFromDock: false,
       updateChannel: "stable",
       trayScale: 1,
-      localInsights: true,
+      localInsights: false,
     },
   };
 }
@@ -1539,18 +1533,17 @@ test("a failed sign-in shows the error and retries", async () => {
   expect(api.startAccountLogin).toHaveBeenCalledTimes(2);
 });
 
-test("sign in again re-authenticates the existing account in place", async () => {
+test("sign in again re-authenticates a managed secondary account in place", async () => {
   const user = userEvent.setup();
   api.guardedFetch.mockResolvedValue(
     dashboardState({
       accounts: [
-        // The system-default account: auto-detected is what makes an in-place
-        // re-auth legitimate (the UI hides Sign in again otherwise, mirroring
-        // the backend guard).
         accountView({
-          id: "claude-local",
-          label: "Default Claude",
-          autoDetected: true,
+          id: "claude-managed",
+          label: "Managed Claude",
+          autoDetected: false,
+          configDir: "/burnrate/cli/claude-code/claude-managed",
+          credentialPath: "/burnrate/cli/claude-code/claude-managed",
         }),
       ],
       snapshots: [],
@@ -1558,15 +1551,42 @@ test("sign in again re-authenticates the existing account in place", async () =>
   );
 
   render(<App />);
-  await user.click(await screen.findByText("Default Claude"));
+  await user.click(await screen.findByText("Managed Claude"));
   await user.click(screen.getByRole("button", { name: /Sign in again/ }));
 
-  // The existing account id is threaded through so the backend re-auths in place.
+  // The managed account id is threaded through so the backend re-auths only
+  // inside its Burnrate-owned isolated CLI home.
   expect(api.startAccountLogin).toHaveBeenCalledWith(
     "claude-code",
     "Claude Code",
-    "claude-local",
+    "claude-managed",
   );
+});
+
+test("legacy auto-detected system accounts cannot be re-authenticated", async () => {
+  const user = userEvent.setup();
+  api.guardedFetch.mockResolvedValue(
+    dashboardState({
+      accounts: [
+        accountView({
+          id: "claude-local",
+          label: "Legacy Claude",
+          autoDetected: true,
+          configDir: null,
+          credentialPath: "~/.claude",
+        }),
+      ],
+      snapshots: [],
+    }),
+  );
+
+  render(<App />);
+  await user.click(await screen.findByText("Legacy Claude"));
+
+  expect(
+    screen.queryByRole("button", { name: /Sign in again/ }),
+  ).not.toBeInTheDocument();
+  expect(api.startAccountLogin).not.toHaveBeenCalled();
 });
 
 test("signing out an account calls logoutAccount", async () => {

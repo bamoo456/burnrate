@@ -1,17 +1,9 @@
 //! claudex-backed local usage insights.
 //!
-//! Burnrate's quota providers report what a vendor says remains; this module
-//! reports what the local CLIs actually consumed, computed by the `claudex`
-//! library from on-disk session logs (Claude Code, Codex, Copilot). claudex
-//! maintains a sqlite index at `~/.claudex/index.db` (`CLAUDEX_DIR` override)
-//! shared with the claudex CLI — WAL plus a 30s busy timeout make concurrent
-//! use safe.
-//!
-//! Everything here is local: no HTTP, no credentials. The first collection on
-//! a machine with a large session history rebuilds the whole index and can
-//! take minutes, so callers must keep it off the dashboard's critical path.
-//! Local history also cannot be attributed to one of several accounts of the
-//! same provider, which is why metrics are per provider, not per account.
+//! Upstream Burnrate can index local Claude Code, Codex, and Copilot session
+//! logs. This fork is account-managed-only: provider data must come from an
+//! account explicitly configured in Burnrate, so production entry points below
+//! fail closed before claudex is allowed to inspect local CLI state.
 
 use std::path::PathBuf;
 
@@ -30,6 +22,13 @@ const TIMELINE_DAYS: usize = 14;
 /// Cap for the model-distribution and top-project lists.
 const TOP_LIMIT: usize = 5;
 
+/// Central policy gate for all local-session inspection. Keep this as a runtime
+/// function (rather than compiling the implementation out) so upstream claudex
+/// logic and its hermetic unit tests remain merge-friendly and exercised.
+fn local_session_scanning_disabled() -> bool {
+    true
+}
+
 /// The claudex providers backing a burnrate provider, or `None` for providers
 /// with no local session source (their usage lives server-side).
 pub(crate) fn claudex_kinds(provider: ProviderKind) -> Option<Vec<Provider>> {
@@ -44,11 +43,15 @@ pub(crate) fn claudex_kinds(provider: ProviderKind) -> Option<Vec<Provider>> {
 }
 
 /// Build the local-usage report for `providers` (deduplicated, order
-/// preserved). Runs claudex on a blocking thread: the rusqlite-backed client
-/// is `Send` but not `Sync`, and the first sync may scan every session log on
-/// disk. Never errors — failures degrade to `available: false` so a broken
-/// index can't take the dashboard down with it.
+/// preserved). Account-managed-only mode never reaches the claudex indexer.
 pub(crate) async fn collect_local_usage(providers: Vec<ProviderKind>) -> LocalUsageReport {
+    if local_session_scanning_disabled() {
+        return unavailable(
+            "Local CLI session scanning is disabled; add accounts explicitly in Burnrate."
+                .to_string(),
+        );
+    }
+
     match tokio::task::spawn_blocking(move || collect_blocking(None, Vec::new(), &providers)).await
     {
         Ok(report) => report,
@@ -254,11 +257,15 @@ fn local_midnight(date: NaiveDate) -> DateTime<Utc> {
         .unwrap_or_else(|| naive.and_utc())
 }
 
-/// Month-to-date premium requests from local Copilot CLI session logs. Only
-/// CLI sessions that shut down cleanly record the count, and only this
-/// machine's sessions are visible — the result is a lower bound, and every UI
-/// surface labels it an estimate.
+/// Month-to-date premium requests from local Copilot CLI session logs. Local
+/// inspection is disabled in this fork; callers must use explicit credentials.
 pub(crate) async fn copilot_premium_requests_mtd() -> Result<u64> {
+    if local_session_scanning_disabled() {
+        return Err(anyhow::anyhow!(
+            "local Copilot session scanning is disabled; configure a GitHub token"
+        ));
+    }
+
     match tokio::task::spawn_blocking(|| premium_requests_blocking(None)).await {
         Ok(result) => result,
         Err(error) => Err(anyhow::anyhow!("premium request scan task failed: {error}")),
@@ -324,9 +331,6 @@ pub(crate) mod test_support {
         };
         apply("CLAUDEX_DIR", state_dir);
         apply("CLAUDEX_COPILOT_DIR", copilot_dir);
-        // Clear on unwind too: a panicking (failing) test must not leak its
-        // fixture roots into later tests. Declared after the lock guard so it
-        // drops first — env resets while the lock is still held.
         struct ResetOnDrop;
         impl Drop for ResetOnDrop {
             fn drop(&mut self) {
@@ -340,8 +344,6 @@ pub(crate) mod test_support {
         body()
     }
 
-    /// Write a minimal-but-valid Copilot CLI session into
-    /// `<base>/session-state/<id>/events.jsonl`, stamped `at`.
     pub(crate) fn write_copilot_fixture(
         base: &Path,
         session_id: &str,
@@ -409,23 +411,16 @@ mod tests {
         let mid_june = NaiveDate::from_ymd_opt(2026, 6, 15).unwrap();
         assert_eq!(projected_month_cost(50.0, mid_june), Some(100.0));
 
-        // Day one projects a full month at today's spend.
         let first = NaiveDate::from_ymd_opt(2026, 6, 1).unwrap();
         assert_eq!(projected_month_cost(3.0, first), Some(90.0));
 
-        // Month end converges on the actual spend.
         let last = NaiveDate::from_ymd_opt(2026, 6, 30).unwrap();
         assert_eq!(projected_month_cost(90.0, last), Some(90.0));
 
-        // February (leap year) uses 29 days.
         let leap = NaiveDate::from_ymd_opt(2028, 2, 29).unwrap();
         assert_eq!(projected_month_cost(29.0, leap), Some(29.0));
 
-        assert_eq!(
-            projected_month_cost(0.0, mid_june),
-            None,
-            "no spend, no projection"
-        );
+        assert_eq!(projected_month_cost(0.0, mid_june), None);
     }
 
     #[test]
@@ -435,9 +430,7 @@ mod tests {
             timeline_row("2026-06-08", 1, 1.0),
             timeline_row("2026-06-09", 3, 2.5),
         ];
-
         let daily = daily_series(rows);
-
         let dates: Vec<&str> = daily.iter().map(|d| d.date.as_str()).collect();
         assert_eq!(dates, vec!["2026-06-08", "2026-06-09", "2026-06-10"]);
         assert_eq!(daily[2].cost_usd, 4.0);
@@ -455,16 +448,11 @@ mod tests {
             model_row("m5", 1, 3.0),
             model_row("m6", 1, 2.0),
         ];
-
         let (top, distribution) = model_breakdown(rows);
-
         assert_eq!(top.as_deref(), Some("claude-fable-5"));
         assert_eq!(distribution.len(), TOP_LIMIT, "capped at TOP_LIMIT");
         assert_eq!(distribution[0].model, "claude-fable-5");
-        assert!(
-            !distribution.iter().any(|m| m.model == "idle-model"),
-            "zero-activity rows are dropped"
-        );
+        assert!(!distribution.iter().any(|m| m.model == "idle-model"));
     }
 
     #[test]
@@ -472,7 +460,6 @@ mod tests {
         let now = Local::now();
         let day = DateTime::parse_from_rfc3339(&start_of_day(now)).unwrap();
         let month = DateTime::parse_from_rfc3339(&start_of_month(now)).unwrap();
-
         assert!(day <= now.fixed_offset());
         assert!(month <= day);
         assert_eq!(month.with_timezone(&Local).day(), 1);
@@ -483,9 +470,6 @@ mod tests {
         let state = tempdir().unwrap();
         let copilot_home = tempdir().unwrap();
         write_copilot_fixture(copilot_home.path(), "11111111-aaaa", Utc::now(), 7);
-
-        // Root the claudex Copilot provider at the fixture instead of
-        // ~/.copilot; the claudex client reads the var at construction.
         let report = with_copilot_dir(copilot_home.path(), || {
             collect_blocking(
                 Some(state.path().to_path_buf()),
@@ -493,7 +477,6 @@ mod tests {
                 &[ProviderKind::Copilot, ProviderKind::OpenRouter],
             )
         });
-
         assert!(report.available, "report: {:?}", report.message);
         assert_eq!(report.providers.len(), 1, "openrouter has no local source");
         let usage = &report.providers[0];
@@ -521,7 +504,6 @@ mod tests {
             present_on_disk: true,
             archived_at: None,
         };
-
         let sessions = vec![
             session(Some(r#"{"premium_requests":12,"branch":"main"}"#)),
             session(Some(r#"{"premium_requests":30}"#)),
@@ -529,7 +511,6 @@ mod tests {
             session(Some("{not json")),
             session(None),
         ];
-
         assert_eq!(sum_premium_requests(&sessions), 42);
         assert_eq!(sum_premium_requests(&[]), 0);
     }
@@ -541,32 +522,25 @@ mod tests {
         let now = Utc::now();
         write_copilot_fixture(copilot_home.path(), "22222222-bbbb", now, 5);
         write_copilot_fixture(copilot_home.path(), "33333333-cccc", now, 9);
-        // A session from a previous month must not count toward MTD. 40 days
-        // is always outside the current month.
         write_copilot_fixture(
             copilot_home.path(),
             "44444444-dddd",
             now - chrono::Duration::days(40),
             100,
         );
-
         let counted = with_copilot_dir(copilot_home.path(), || {
             premium_requests_blocking(Some(state.path().to_path_buf()))
         })
         .unwrap();
-
         assert_eq!(counted, 14);
     }
 
     #[test]
     fn broken_state_dir_degrades_to_unavailable_instead_of_erroring() {
         let dir = tempdir().unwrap();
-        // A file where the state dir should be makes IndexStore::open_at fail.
         let bogus = dir.path().join("not-a-dir");
         fs::write(&bogus, b"x").unwrap();
-
         let report = collect_blocking(Some(bogus), vec![], &[ProviderKind::ClaudeCode]);
-
         assert!(!report.available);
         assert!(report.message.is_some());
         assert!(report.providers.is_empty());
