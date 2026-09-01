@@ -9,10 +9,13 @@ import {
 import { type ReactNode, useState } from "react";
 import { AccountModal, type AccountModalMode } from "./AccountModal";
 import {
+  balanceBuckets,
+  balanceUnavailableReason,
   bucketMeterLabel,
   bucketPercent,
   displayBuckets,
   formatAgo,
+  formatBalance,
   formatLimit,
   formatReset,
   hasAwsCostData,
@@ -514,6 +517,8 @@ function AccountButton({
 }
 
 function UsageRow({ snapshot }: { snapshot: UsageSnapshot }) {
+  const balances = balanceBuckets(snapshot);
+  const balanceNote = balanceUnavailableReason(snapshot);
   const buckets = displayBuckets(snapshot);
   const plan = snapshot.subscription?.planLabel;
 
@@ -539,21 +544,49 @@ function UsageRow({ snapshot }: { snapshot: UsageSnapshot }) {
         </div>
         <StatusBadge status={snapshot.status} />
       </div>
+      {balances.length > 0 || balanceNote ? (
+        <div className="usage-buckets" aria-label="Credits and balance">
+          {balances.map((bucket) => (
+            <BalanceLine key={bucket.id} bucket={bucket} />
+          ))}
+          {balanceNote ? (
+            <div className="bucket-line">
+              <div>
+                <span>Balance</span>
+                <strong>Unavailable</strong>
+              </div>
+              <small>{balanceNote}</small>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
       {buckets.length > 0 ? (
-        <div className="usage-buckets">
+        <div className="usage-buckets" aria-label="Usage limits">
           {buckets.map((bucket) => (
             <BucketLine key={bucket.id} bucket={bucket} />
           ))}
         </div>
-      ) : (
+      ) : balances.length === 0 && !balanceNote ? (
         <p className="snapshot-message">
           {snapshot.message ?? "Usage unavailable."}
         </p>
-      )}
+      ) : null}
       {snapshot.message ? (
         <p className="snapshot-message">{snapshot.message}</p>
       ) : null}
     </article>
+  );
+}
+
+function BalanceLine({ bucket }: { bucket: UsageBucketSnapshot }) {
+  return (
+    <div className={`bucket-line ${bucket.status}`}>
+      <div>
+        <span>{bucket.label}</span>
+        <strong>{formatBalance(bucket)}</strong>
+      </div>
+      <small>Available balance</small>
+    </div>
   );
 }
 
