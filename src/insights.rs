@@ -38,7 +38,10 @@ pub(crate) fn claudex_kinds(provider: ProviderKind) -> Option<Vec<Provider>> {
         // The Copilot CLI carries token/premium-request metrics; VS Code
         // Copilot Chat sessions are indexed too and contribute session counts.
         ProviderKind::Copilot => Some(vec![Provider::Copilot, Provider::CopilotVscode]),
-        ProviderKind::OpenRouter | ProviderKind::Runpod | ProviderKind::Aws => None,
+        ProviderKind::OpenRouter
+        | ProviderKind::OpenCodeGo
+        | ProviderKind::Runpod
+        | ProviderKind::Aws => None,
     }
 }
 
@@ -402,6 +405,7 @@ mod tests {
             Some(vec![Provider::Copilot, Provider::CopilotVscode])
         );
         assert_eq!(claudex_kinds(ProviderKind::OpenRouter), None);
+        assert_eq!(claudex_kinds(ProviderKind::OpenCodeGo), None);
         assert_eq!(claudex_kinds(ProviderKind::Runpod), None);
         assert_eq!(claudex_kinds(ProviderKind::Aws), None);
     }
@@ -474,11 +478,15 @@ mod tests {
             collect_blocking(
                 Some(state.path().to_path_buf()),
                 vec![Provider::Copilot],
-                &[ProviderKind::Copilot, ProviderKind::OpenRouter],
+                &[
+                    ProviderKind::Copilot,
+                    ProviderKind::OpenRouter,
+                    ProviderKind::OpenCodeGo,
+                ],
             )
         });
         assert!(report.available, "report: {:?}", report.message);
-        assert_eq!(report.providers.len(), 1, "openrouter has no local source");
+        assert_eq!(report.providers.len(), 1, "API providers have no local source");
         let usage = &report.providers[0];
         assert_eq!(usage.provider, ProviderKind::Copilot);
         assert_eq!(usage.today_sessions, 1);
