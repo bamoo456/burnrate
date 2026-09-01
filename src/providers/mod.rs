@@ -187,18 +187,16 @@ fn now_millis() -> u64 {
         .unwrap_or(u64::MAX)
 }
 
+/// Account discovery is intentionally disabled in this fork. Accounts must be
+/// explicitly added or signed in through Burnrate so the app never reads the
+/// user's system-default Claude/Codex/Copilot credential stores on startup or
+/// when the old "Detect accounts" command is invoked.
 pub(crate) fn detect_accounts() -> Vec<AccountConfig> {
-    let mut accounts = Vec::new();
-    if let Some(account) = claude::detect() {
-        accounts.push(account);
-    }
-    if let Some(account) = codex::detect() {
-        accounts.push(account);
-    }
-    if let Some(account) = copilot::detect() {
-        accounts.push(account);
-    }
-    accounts
+    // Keep detector symbols referenced so upstream provider modules can remain
+    // merge-friendly without dead-code warnings. They are never executed.
+    let _disabled_detectors: [fn() -> Option<AccountConfig>; 3] =
+        [claude::detect, codex::detect, copilot::detect];
+    Vec::new()
 }
 
 pub(crate) fn error_snapshot(account: &AccountConfig, error: anyhow::Error) -> UsageSnapshot {
@@ -217,11 +215,27 @@ pub(crate) fn error_snapshot(account: &AccountConfig, error: anyhow::Error) -> U
 }
 
 fn endpoint(account: &AccountConfig, env_key: &str, default: &str) -> Result<String> {
-    let value = account
-        .endpoint_override
-        .clone()
-        .or_else(|| std::env::var(env_key).ok())
-        .unwrap_or_else(|| default.to_string());
+    let account_override = account.endpoint_override.clone();
+    let env_override = std::env::var(env_key)
+        .ok()
+        .filter(|value| !value.trim().is_empty());
+
+    // Provider mocks need endpoint overrides in unit tests. Production builds
+    // deliberately fail closed: a credential-bearing request must never be
+    // redirected to an arbitrary HTTPS host by config or environment state.
+    if !cfg!(test) && (account_override.is_some() || env_override.is_some()) {
+        return Err(anyhow!(
+            "custom provider endpoints are disabled in this build; remove the endpoint override"
+        ));
+    }
+
+    let value = if cfg!(test) {
+        account_override
+            .or(env_override)
+            .unwrap_or_else(|| default.to_string())
+    } else {
+        default.to_string()
+    };
 
     validate_endpoint(&value)?;
     Ok(value)
