@@ -3,6 +3,7 @@ mod claude;
 mod codex;
 mod copilot;
 pub(crate) mod login;
+mod opencode_go;
 mod openrouter;
 mod runpod;
 
@@ -87,6 +88,7 @@ impl ProviderClient {
             ProviderKind::ClaudeCode => claude::fetch(&self.http, account).await,
             ProviderKind::Codex => codex::fetch(&self.http, account).await,
             ProviderKind::OpenRouter => openrouter::fetch(&self.http, account).await,
+            ProviderKind::OpenCodeGo => opencode_go::fetch(&self.http, account).await,
             ProviderKind::Runpod => runpod::fetch(&self.http, account).await,
             ProviderKind::Aws => match aws::fetch(account).await {
                 Ok(snapshot) => Ok(snapshot),
@@ -706,7 +708,9 @@ fn token_pointers(provider: ProviderKind) -> &'static [&'static str] {
             "/api_key",
             "/apiKey",
         ],
-        ProviderKind::OpenRouter | ProviderKind::Runpod => &["/api_key", "/apiKey", "/key"],
+        ProviderKind::OpenRouter | ProviderKind::OpenCodeGo | ProviderKind::Runpod => {
+            &["/api_key", "/apiKey", "/key"]
+        }
         // AWS uses the SDK credential chain; Copilot's optional GitHub token
         // lives in the key store, which `token_from_config` checks first.
         ProviderKind::Aws | ProviderKind::Copilot => &[],
