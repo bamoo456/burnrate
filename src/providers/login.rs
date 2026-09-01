@@ -163,8 +163,9 @@ impl LoginManager {
     }
 }
 
-/// Run the interactive sign-in for `provider` into `config_dir`, emitting
-/// progress events through `app`, then verify the result and return the email.
+/// Run the interactive sign-in for `provider` into a Burnrate-owned isolated
+/// CLI home, emitting progress events through `app`, then verify the result and
+/// return the email. System-default CLI homes are deliberately never targeted.
 pub(crate) async fn run_login(
     app: AppHandle,
     provider: ProviderKind,
@@ -173,6 +174,17 @@ pub(crate) async fn run_login(
     email_hint: Option<String>,
     input_rx: mpsc::UnboundedReceiver<String>,
 ) -> Result<LoginOutcome> {
+    let managed_dir = config_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|dir| !dir.is_empty())
+        .filter(|dir| crate::config::is_managed_cli_dir(std::path::Path::new(dir)))
+        .ok_or_else(|| {
+            anyhow!(
+                "Interactive sign-in requires a Burnrate-managed isolated CLI home; remove legacy/system accounts and add them again through Burnrate."
+            )
+        })?;
+
     let (binary, args, env_key) = login_command(provider, email_hint.as_deref())?;
     let id = account_id.clone();
     let mut on_progress = move |line: &str, url: Option<&str>| {
@@ -196,13 +208,13 @@ pub(crate) async fn run_login(
         &binary,
         &args,
         env_key,
-        config_dir.as_deref(),
+        Some(managed_dir),
         provider != ProviderKind::ClaudeCode,
         input_rx,
         &mut on_progress,
     )
     .await?;
-    let email = verify(provider, config_dir.as_deref()).await?;
+    let email = verify(provider, Some(managed_dir)).await?;
     Ok(LoginOutcome { email })
 }
 
@@ -274,8 +286,8 @@ async fn run_login_inner(
     // treat itself as already authenticated via env and skip the real browser
     // flow, so the sign-in writes nothing to the account's credential store.
     super::strip_credential_env(&mut command);
-    // `None` means the system-default location (e.g. re-authenticating the
-    // auto-detected account refreshes `~/.claude` / `~/.codex` directly).
+    // Production only calls this with a Burnrate-managed isolated directory;
+    // `None` remains a test seam for the provider-agnostic runner.
     if let Some(dir) = config_dir.filter(|dir| !dir.trim().is_empty()) {
         command.env(env_key, dir);
     }
@@ -330,7 +342,7 @@ async fn run_login_inner(
                 },
             };
             let Some(line) = line else { continue };
-            if let Some(url) = extract_url(&line) {
+            if let Some(url) = extract_url(&line).filter(|url| is_allowed_auth_url(url)) {
                 if open_browser && !opened {
                     open_url(&url);
                 }
@@ -430,6 +442,23 @@ fn extract_url(line: &str) -> Option<String> {
     (url.len() > "https://".len()).then(|| url.to_string())
 }
 
+/// Only surface/open provider-owned OAuth hosts. A compromised or shadowed CLI
+/// must not be able to turn a progress line into an arbitrary clickable URL.
+fn is_allowed_auth_url(value: &str) -> bool {
+    let Ok(url) = url::Url::parse(value) else {
+        return false;
+    };
+    if url.scheme() != "https" {
+        return false;
+    }
+    let Some(host) = url.host_str().map(|host| host.to_ascii_lowercase()) else {
+        return false;
+    };
+    ["openai.com", "chatgpt.com", "claude.ai", "anthropic.com"]
+        .iter()
+        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+}
+
 /// True if a line looks like it carries a secret (token, key, or JWT).
 fn contains_secret(line: &str) -> bool {
     line.contains("sk-ant-") || line.contains("eyJ") || has_long_token_run(line)
@@ -462,6 +491,9 @@ fn sanitize_line(line: &str) -> Option<String> {
 }
 
 fn open_url(url: &str) {
+    if !is_allowed_auth_url(url) {
+        return;
+    }
     #[cfg(target_os = "macos")]
     let program = "open";
     #[cfg(target_os = "linux")]
@@ -489,6 +521,16 @@ mod tests {
         );
         assert_eq!(extract_url("no link here"), None);
         assert_eq!(extract_url("http://insecure.example"), None);
+    }
+
+    #[test]
+    fn auth_url_allowlist_rejects_lookalikes_and_unrelated_hosts() {
+        assert!(is_allowed_auth_url("https://auth.openai.com/device"));
+        assert!(is_allowed_auth_url("https://claude.ai/oauth/authorize"));
+        assert!(is_allowed_auth_url("https://console.anthropic.com/oauth"));
+        assert!(!is_allowed_auth_url("https://openai.com.evil.example/login"));
+        assert!(!is_allowed_auth_url("https://auth.example/login"));
+        assert!(!is_allowed_auth_url("http://openai.com/login"));
     }
 
     #[test]
@@ -584,7 +626,7 @@ mod tests {
             &binary,
             r#"#!/bin/sh
 echo "token sk-ant-oat01-supersecretvalue"
-echo "Open https://auth.example/device?code=XYZ in your browser"
+echo "Open https://auth.openai.com/device?code=XYZ in your browser"
 echo "configdir=$CODEX_HOME" > "$CODEX_HOME/seen"
 exit 0
 "#,
@@ -618,7 +660,7 @@ exit 0
         assert!(
             events
                 .iter()
-                .any(|(_, url)| url.as_deref() == Some("https://auth.example/device?code=XYZ"))
+                .any(|(_, url)| url.as_deref() == Some("https://auth.openai.com/device?code=XYZ"))
         );
         // The secret line was never forwarded.
         assert!(events.iter().all(|(line, _)| !line.contains("sk-ant-")));
@@ -672,7 +714,7 @@ exit 0
             &binary,
             format!(
                 r#"#!/bin/sh
-echo "Open https://auth.example/manual in your browser"
+echo "Open https://auth.openai.com/manual in your browser"
 IFS= read -r code
 printf "%s" "$code" > "{}"
 exit 0
