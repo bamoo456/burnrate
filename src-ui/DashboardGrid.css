@@ -121,6 +121,19 @@
   white-space: nowrap;
 }
 
+.dashboard-extras b {
+  color: var(--fg-soft);
+  font-weight: 650;
+}
+
+.dashboard-extras small {
+  display: inline;
+  color: inherit;
+  font-size: inherit;
+  overflow: visible;
+  white-space: inherit;
+}
+
 .dashboard-metric {
   min-height: 48px;
   display: flex;
