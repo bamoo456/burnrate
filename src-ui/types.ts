@@ -2,6 +2,7 @@ export type ProviderKind =
   | "claude-code"
   | "codex"
   | "openrouter"
+  | "opencode-go"
   | "runpod"
   | "aws"
   | "copilot";

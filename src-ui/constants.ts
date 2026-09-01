@@ -15,6 +15,7 @@ export const providerLabels: Record<ProviderKind, string> = {
   "claude-code": "Claude Code",
   codex: "Codex",
   openrouter: "OpenRouter",
+  "opencode-go": "OpenCode Go",
   runpod: "Runpod",
   aws: "AWS",
   copilot: "GitHub Copilot",
@@ -101,9 +102,10 @@ export const emptyForm: AccountInput = {
 export const PROVIDERS: ProviderKind[] = [
   "claude-code",
   "codex",
+  "opencode-go",
+  "openrouter",
   "copilot",
   "aws",
-  "openrouter",
   "runpod",
 ];
 

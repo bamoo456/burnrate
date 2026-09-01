@@ -8,6 +8,8 @@ pub(crate) enum ProviderKind {
     Codex,
     #[serde(rename = "openrouter", alias = "open-router")]
     OpenRouter,
+    #[serde(rename = "opencode-go", alias = "open-code-go")]
+    OpenCodeGo,
     Runpod,
     Aws,
     Copilot,
@@ -19,6 +21,7 @@ impl ProviderKind {
             ProviderKind::ClaudeCode => "claude-code",
             ProviderKind::Codex => "codex",
             ProviderKind::OpenRouter => "openrouter",
+            ProviderKind::OpenCodeGo => "opencode-go",
             ProviderKind::Runpod => "runpod",
             ProviderKind::Aws => "aws",
             ProviderKind::Copilot => "copilot",
@@ -32,6 +35,7 @@ impl ProviderKind {
             ProviderKind::ClaudeCode => "Claude Code",
             ProviderKind::Codex => "Codex",
             ProviderKind::OpenRouter => "OpenRouter",
+            ProviderKind::OpenCodeGo => "OpenCode Go",
             ProviderKind::Runpod => "Runpod",
             ProviderKind::Aws => "AWS",
             ProviderKind::Copilot => "GitHub Copilot",
@@ -421,7 +425,7 @@ pub(crate) struct ProviderLocalUsage {
     pub top_model: Option<String>,
     pub model_distribution: Vec<LocalModelUsage>,
     pub top_projects: Vec<LocalProjectCost>,
-    /// Daily cost buckets, ascending by date (sparkline source).
+    /// Daily cost buckets, ascending by ISO date (sparkline source).
     pub daily: Vec<LocalDailyUsage>,
 }
 
@@ -459,6 +463,7 @@ mod tests {
         assert_eq!(ProviderKind::ClaudeCode.as_str(), "claude-code");
         assert_eq!(ProviderKind::Codex.as_str(), "codex");
         assert_eq!(ProviderKind::OpenRouter.as_str(), "openrouter");
+        assert_eq!(ProviderKind::OpenCodeGo.as_str(), "opencode-go");
         assert_eq!(ProviderKind::Runpod.as_str(), "runpod");
         assert_eq!(ProviderKind::Aws.as_str(), "aws");
         assert_eq!(ProviderKind::Copilot.as_str(), "copilot");
@@ -469,6 +474,14 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<ProviderKind>("\"open-router\"").unwrap(),
             ProviderKind::OpenRouter
+        );
+        assert_eq!(
+            serde_json::to_string(&ProviderKind::OpenCodeGo).unwrap(),
+            "\"opencode-go\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ProviderKind>("\"open-code-go\"").unwrap(),
+            ProviderKind::OpenCodeGo
         );
         assert_eq!(
             serde_json::to_string(&ProviderKind::Copilot).unwrap(),
