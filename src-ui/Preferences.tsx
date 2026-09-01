@@ -5,11 +5,9 @@ import {
   Plus,
   RefreshCw,
   Trash2,
-  Wifi,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { AccountModal, type AccountModalMode } from "./AccountModal";
-import { InsightsPanel, type InsightsPanelProps } from "./InsightsPanel";
 import {
   bucketMeterLabel,
   bucketPercent,
@@ -76,14 +74,12 @@ export function Preferences({
   error,
   onSaveAccount,
   onToggleAccount,
-  onDetect,
   onRefresh,
   onRemoveAccount,
   onStartLogin,
   onLogout,
   onReorderAccounts,
   settings,
-  insights,
   updates,
 }: {
   accounts: AccountView[];
@@ -94,14 +90,12 @@ export function Preferences({
   /** Resolves on success; rejections render inline in the account modal. */
   onSaveAccount: (input: AccountInput) => Promise<void>;
   onToggleAccount: (account: AccountView) => void;
-  onDetect: () => void;
   onRefresh: () => void;
   onRemoveAccount: (id: string) => void;
   onStartLogin: (provider: ProviderKind, accountId?: string) => void;
   onLogout: (id: string) => void;
   onReorderAccounts: (orderedIds: string[]) => void;
   settings: TraySettingsPanelProps;
-  insights: InsightsPanelProps;
   updates: UpdatesPanelProps;
 }) {
   const [modal, setModal] = useState<
@@ -119,12 +113,10 @@ export function Preferences({
       : editingAccount
         ? { kind: "edit", account: editingAccount }
         : null;
-  // Mirrors the backend re-auth guard: browser sign-in is only safe for the
-  // auto-detected system-default account or one with an isolated config dir.
-  const canReauth =
-    !editingAccount ||
-    editingAccount.autoDetected ||
-    Boolean(editingAccount.configDir);
+  // New browser sign-ins get an isolated CLI home. Legacy auto-detected
+  // system-default accounts are intentionally not eligible for re-auth because
+  // that would target ~/.claude / ~/.codex rather than Burnrate-owned state.
+  const canReauth = !editingAccount || Boolean(editingAccount.configDir);
 
   return (
     <main className="prefs-shell">
@@ -134,14 +126,6 @@ export function Preferences({
           <p>{summary.label}</p>
         </div>
         <div className="toolbar">
-          <button
-            className="icon-button"
-            onClick={onDetect}
-            disabled={busy}
-            title="Detect accounts"
-          >
-            <Wifi size={17} />
-          </button>
           <button
             className="icon-button"
             onClick={onRefresh}
@@ -211,10 +195,7 @@ export function Preferences({
 
         <section className="prefs-main" aria-label="Usage and account settings">
           {accounts.length === 0 && snapshots.length === 0 && !busy ? (
-            <FirstRunPanel
-              onAdd={() => setModal({ kind: "add" })}
-              onDetect={onDetect}
-            />
+            <FirstRunPanel onAdd={() => setModal({ kind: "add" })} />
           ) : (
             <section className="prefs-usage">
               <SectionTitle
@@ -227,14 +208,21 @@ export function Preferences({
                 ))}
                 {!busy && snapshots.length === 0 ? (
                   <div className="empty-state">
-                    Add or detect an account to start monitoring quota.
+                    Add an account to start monitoring quota.
                   </div>
                 ) : null}
               </div>
             </section>
           )}
 
-          <InsightsPanel {...insights} />
+          <section className="prefs-insights" aria-label="Credential policy">
+            <SectionTitle title="Credential policy" detail="Account-managed only" />
+            <p className="muted">
+              Burnrate does not auto-detect system CLI accounts or scan local
+              Claude Code, Codex, or Copilot session history. Credentials must be
+              added explicitly and secrets are stored in the OS keyring.
+            </p>
+          </section>
 
           <TraySettings {...settings} />
 
@@ -262,13 +250,7 @@ export function Preferences({
 }
 
 /** Guided empty state for a fresh install: no accounts configured yet. */
-function FirstRunPanel({
-  onAdd,
-  onDetect,
-}: {
-  onAdd: () => void;
-  onDetect: () => void;
-}) {
+function FirstRunPanel({ onAdd }: { onAdd: () => void }) {
   return (
     <section className="prefs-usage first-run" aria-label="Get started">
       <SectionTitle title="Get started" detail="No accounts yet" />
@@ -279,16 +261,13 @@ function FirstRunPanel({
           ))}
         </div>
         <p className="muted">
-          Burnrate watches quotas, credits, and spend across your AI providers
-          from the menu bar. CLIs already signed in on this Mac (Claude Code,
-          Codex, Copilot) can be detected automatically.
+          Add each account explicitly. Claude Code and Codex browser sign-ins
+          are isolated from your system-default CLI sessions; API keys are kept
+          in the operating system keyring.
         </p>
         <div className="first-run-actions">
           <button className="primary" onClick={onAdd}>
             <Plus size={15} /> Add your first account
-          </button>
-          <button className="secondary" onClick={onDetect}>
-            <Wifi size={15} /> Detect accounts
           </button>
         </div>
       </div>
@@ -425,7 +404,7 @@ function AccountButton({
           <strong>{account.label}</strong>
           <small>
             {providerLabels[account.provider]}
-            {account.autoDetected ? " · Auto" : ""}
+            {account.autoDetected ? " · Legacy auto-detected" : ""}
           </small>
           {account.email ? (
             <small className="account-email">{account.email}</small>
