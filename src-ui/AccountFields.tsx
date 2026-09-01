@@ -10,7 +10,6 @@ import type {
   AwsCategoryConfig,
   AwsCostFilter,
   CopilotPlan,
-  SecretStorageMode,
 } from "./types";
 
 /**
@@ -54,55 +53,26 @@ export function AccountFields({
         <CopilotFields form={form} setForm={setForm} isEdit={isEdit} />
       ) : (
         <>
-          <div className="segmented" role="group" aria-label="Secret storage">
-            {(["keyring", "plaintext"] satisfies SecretStorageMode[]).map(
-              (mode) => (
-                <button
-                  key={mode}
-                  type="button"
-                  className={form.secretStorage === mode ? "active" : ""}
-                  onClick={() =>
-                    setForm((current) => ({
-                      ...current,
-                      secretStorage: mode,
-                    }))
-                  }
-                >
-                  {mode === "keyring" ? "Keyring" : "Plaintext"}
-                </button>
-              ),
-            )}
-          </div>
-
-          <div className="form-grid">
-            <label>
-              {isCliProvider ? "API Key (optional)" : "API Key"}
-              <input
-                type="password"
-                value={form.secret ?? ""}
-                placeholder={isEdit ? "Leave blank to keep existing" : ""}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    secret: event.target.value,
-                  }))
-                }
-              />
-            </label>
-
-            <label>
-              Endpoint
-              <input
-                value={form.endpointOverride ?? ""}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    endpointOverride: event.target.value,
-                  }))
-                }
-              />
-            </label>
-          </div>
+          <p className="form-help">
+            Secrets are stored only in your operating system keyring. Custom
+            provider endpoints and plaintext credential storage are disabled.
+          </p>
+          <label>
+            {isCliProvider ? "API Key (optional)" : "API Key"}
+            <input
+              type="password"
+              value={form.secret ?? ""}
+              placeholder={isEdit ? "Leave blank to keep existing" : ""}
+              onChange={(event) =>
+                setForm((current) => ({
+                  ...current,
+                  secret: event.target.value,
+                  secretStorage: "keyring",
+                  endpointOverride: null,
+                }))
+              }
+            />
+          </label>
         </>
       )}
 
@@ -137,9 +107,8 @@ function CopilotFields({
   return (
     <div className="copilot-fields">
       <p className="form-help">
-        Without a token, usage is estimated from Copilot CLI session logs on
-        this Mac — IDE and web usage is not counted. A GitHub token (classic)
-        fetches your exact premium-request usage from GitHub billing.
+        A GitHub token is required. Burnrate no longer scans local Copilot CLI
+        session logs as a fallback. The token is stored only in the OS keyring.
       </p>
       <div className="form-grid">
         <label>
@@ -166,15 +135,18 @@ function CopilotFields({
         </label>
 
         <label>
-          GitHub token (optional)
+          GitHub token
           <input
             type="password"
             value={form.secret ?? ""}
             placeholder={isEdit ? "Leave blank to keep existing" : "ghp_…"}
+            required={!isEdit}
             onChange={(event) =>
               setForm((current) => ({
                 ...current,
                 secret: event.target.value,
+                secretStorage: "keyring",
+                endpointOverride: null,
               }))
             }
           />
