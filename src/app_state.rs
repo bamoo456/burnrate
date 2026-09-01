@@ -209,6 +209,18 @@ impl AppState {
         // collapse into one provider fan-out. Only reuse the result for a tiny
         // burst window; this is de-dupe, not a user-visible freshness cache.
         let mut live_snapshots = self.live_snapshots.lock().await;
+        if live_snapshots
+            .as_ref()
+            .is_some_and(|(_, cached_signature, _)| cached_signature != &signature)
+        {
+            // An account edit can mean a new API key or a newly re-authenticated
+            // CLI identity. Never carry last-known-good data across that revision:
+            // a failed fetch with the new credential must be visible as an error.
+            self.last_good_snapshots
+                .lock()
+                .expect("last good snapshots lock")
+                .clear();
+        }
         if let Some((fetched_at, cached_signature, cached_snapshots)) = live_snapshots.as_ref()
             && cached_signature == &signature
             && fetched_at.elapsed() < LIVE_REFRESH_BURST_WINDOW
@@ -221,7 +233,10 @@ impl AppState {
         // deliberately stays on the long-lived client to preserve the paid Cost
         // Explorer protection already enforced by ProviderClient.
         let fresh_provider_client = ProviderClient::new();
-        let active_ids: HashSet<String> = accounts.iter().map(|account| account.id.clone()).collect();
+        let active_ids: HashSet<String> = accounts
+            .iter()
+            .map(|account| account.id.clone())
+            .collect();
         let mut tasks = Vec::with_capacity(accounts.len());
         for (index, account) in accounts.into_iter().enumerate() {
             let provider_client = if account.provider == ProviderKind::Aws {
@@ -847,7 +862,8 @@ fn cleanup_managed_dir(dir: Option<&str>) {
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
-    use crate::models::{QuotaSnapshot, SubscriptionSnapshot, SubscriptionPlan};
+
+    use crate::models::{QuotaSnapshot, SubscriptionPlan, SubscriptionSnapshot};
 
     fn snapshot(status: SnapshotStatus, message: Option<&str>) -> UsageSnapshot {
         UsageSnapshot {
@@ -914,6 +930,9 @@ mod tests {
                 .remaining,
             Some(1.0)
         );
-        assert_eq!(last_good.get("account-1").unwrap().status, SnapshotStatus::Warning);
+        assert_eq!(
+            last_good.get("account-1").unwrap().status,
+            SnapshotStatus::Warning
+        );
     }
 }
