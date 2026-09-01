@@ -8,6 +8,7 @@ pub(crate) enum ProviderKind {
     Codex,
     #[serde(rename = "openrouter", alias = "open-router")]
     OpenRouter,
+    #[serde(rename = "opencode-go", alias = "open-code-go")]
     OpenCodeGo,
     Runpod,
     Aws,
@@ -476,7 +477,11 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&ProviderKind::OpenCodeGo).unwrap(),
-            "\"open-code-go\""
+            "\"opencode-go\""
+        );
+        assert_eq!(
+            serde_json::from_str::<ProviderKind>("\"open-code-go\"").unwrap(),
+            ProviderKind::OpenCodeGo
         );
         assert_eq!(
             serde_json::to_string(&ProviderKind::Copilot).unwrap(),
