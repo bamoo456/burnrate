@@ -14,6 +14,10 @@ pub(crate) fn set_secret(account: &mut AccountConfig, secret: Option<String>) ->
         return Ok(());
     };
 
+    if account.secret_storage == SecretStorageMode::Plaintext && !cfg!(test) {
+        bail!("plaintext secret storage is disabled; use the OS keyring");
+    }
+
     match account.secret_storage {
         SecretStorageMode::Keyring => {
             let keyring_account = format!("{}:{}", account.provider.as_str(), account.id);
@@ -27,9 +31,8 @@ pub(crate) fn set_secret(account: &mut AccountConfig, secret: Option<String>) ->
             account.plaintext_secret = None;
         }
         SecretStorageMode::Plaintext => {
-            if let Some(keyring_account) = &account.keyring_account {
-                forget_keyring_secret(keyring_account);
-            }
+            // Plaintext exists only as a test seam for legacy provider fixtures.
+            // Production builds reject it above before any secret reaches disk.
             account.plaintext_secret = Some(secret);
             account.keyring_account = None;
         }
@@ -90,6 +93,9 @@ pub(crate) fn get_secret(account: &AccountConfig) -> Result<Option<String>> {
                 Err(error) => Err(error).context("failed to read secret from OS keyring"),
             }
         }
+        SecretStorageMode::Plaintext if !cfg!(test) => {
+            bail!("plaintext secret storage is disabled; move this account to the OS keyring")
+        }
         SecretStorageMode::Plaintext => Ok(account.plaintext_secret.clone()),
     }
 }
@@ -114,9 +120,13 @@ pub(crate) fn remove_secret(account: &AccountConfig) -> Result<()> {
 }
 
 pub(crate) fn validate_plaintext_mode(account: &AccountConfig) -> Result<()> {
-    if account.secret_storage == SecretStorageMode::Plaintext && account.plaintext_secret.is_none()
-    {
-        bail!("plaintext mode is enabled but no plaintext secret is stored");
+    if account.secret_storage == SecretStorageMode::Plaintext {
+        if !cfg!(test) {
+            bail!("plaintext secret storage is disabled; use the OS keyring");
+        }
+        if account.plaintext_secret.is_none() {
+            bail!("plaintext mode is enabled but no plaintext secret is stored");
+        }
     }
     Ok(())
 }
@@ -184,7 +194,6 @@ mod tests {
     fn plaintext_mode_stores_secret_in_config() {
         let mut account = account(SecretStorageMode::Plaintext);
         set_secret(&mut account, Some("sk-test".to_string())).unwrap();
-
         assert_eq!(get_secret(&account).unwrap(), Some("sk-test".to_string()));
         assert!(account.keyring_account.is_none());
     }
@@ -199,9 +208,7 @@ mod tests {
     fn clear_secret_removes_plaintext_secret_refs() {
         let mut account = account(SecretStorageMode::Plaintext);
         account.plaintext_secret = Some("sk-test".to_string());
-
         clear_secret(&mut account).unwrap();
-
         assert!(account.keyring_account.is_none());
         assert!(account.plaintext_secret.is_none());
     }
@@ -211,9 +218,7 @@ mod tests {
         let previous = account(SecretStorageMode::Plaintext);
         let mut next = account(SecretStorageMode::Keyring);
         next.keyring_account = Some("stale".to_string());
-
         migrate_secret(&previous, &mut next).unwrap();
-
         assert!(next.keyring_account.is_none());
         assert!(next.plaintext_secret.is_none());
     }
@@ -222,18 +227,14 @@ mod tests {
     fn keyring_secret_cache_tracks_hits_misses_and_forgets() {
         let keyring_account = "test-cache-entry";
         forget_keyring_secret(keyring_account);
-
         assert_eq!(cached_keyring_secret(keyring_account), None);
-
         remember_keyring_secret(keyring_account, Some("sk-test".to_string()));
         assert_eq!(
             cached_keyring_secret(keyring_account),
             Some(Some("sk-test".to_string()))
         );
-
         remember_keyring_secret(keyring_account, None);
         assert_eq!(cached_keyring_secret(keyring_account), Some(None));
-
         forget_keyring_secret(keyring_account);
         assert_eq!(cached_keyring_secret(keyring_account), None);
     }
