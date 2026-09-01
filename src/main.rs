@@ -27,7 +27,7 @@ use tauri::{
     PhysicalSize, PixelUnit, Position, Size, State, WindowSizeConstraints, Wry, menu::Menu,
 };
 
-const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_secs(5 * 60);
+const BACKGROUND_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
 const PREFERENCES_MIN_WIDTH: f64 = 360.0;
 const PREFERENCES_MIN_HEIGHT: f64 = 360.0;
 const PREFERENCES_MAX_CONTENT_WIDTH: f64 = 1180.0;
