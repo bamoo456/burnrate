@@ -218,6 +218,8 @@ export function Preferences({
             </section>
           )}
 
+          <SectionTitle title="Preferences" detail="Configuration" />
+
           <section className="prefs-insights" aria-label="Credential policy">
             <SectionTitle title="Credential policy" detail="Account-managed only" />
             <p className="muted">
