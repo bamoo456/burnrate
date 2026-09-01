@@ -1,8 +1,9 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Result, anyhow};
@@ -15,7 +16,7 @@ use crate::{
     models::AppSettings,
     models::{
         AccountConfig, AccountInput, AccountView, DashboardState, LocalUsageReport, LoginComplete,
-        LoginFailed, ProviderKind, SecretStorageMode, UsageSnapshot,
+        LoginFailed, ProviderKind, SecretStorageMode, SnapshotStatus, UsageSnapshot,
     },
     providers::{
         self, ProviderClient,
@@ -25,11 +26,28 @@ use crate::{
     tray,
 };
 
+/// Collapse only true burst duplicates (two webviews mounting together, HMR,
+/// tray + preferences opening at the same instant). Normal dashboard refreshes
+/// use a fresh provider client and therefore bypass the providers' legacy 5m
+/// cache for account-managed, non-AWS providers.
+const LIVE_REFRESH_BURST_WINDOW: Duration = Duration::from_secs(2);
+
 pub(crate) struct AppState {
     config_store: ConfigStore,
     config: Mutex<AppConfig>,
+    /// Kept for providers that deliberately need a long-lived cache. AWS Cost
+    /// Explorer is the important case: querying it every minute can create paid
+    /// API traffic, so AWS keeps its existing 24h provider cache.
     provider_client: ProviderClient,
     login_manager: LoginManager,
+    /// Last successful provider snapshot per account. When a live refresh fails,
+    /// the dashboard keeps useful data visible and marks it stale instead of
+    /// replacing the whole card with an empty error snapshot.
+    last_good_snapshots: Mutex<HashMap<String, UsageSnapshot>>,
+    /// Cross-webview burst de-dupe for live dashboard refreshes. The signature
+    /// includes account ids + update timestamps, so account edits/removals never
+    /// reuse a snapshot set from the previous configuration.
+    live_snapshots: tokio::sync::Mutex<Option<(Instant, String, Vec<UsageSnapshot>)>>,
     /// Last good claudex insights report. The async mutex also serializes
     /// collections, so concurrent callers (two webview windows plus the
     /// background refresh) trigger one claudex sync, mirroring the
@@ -59,6 +77,8 @@ impl AppState {
             config: Mutex::new(config),
             provider_client: ProviderClient::new(),
             login_manager: LoginManager::new(),
+            last_good_snapshots: Mutex::new(HashMap::new()),
+            live_snapshots: tokio::sync::Mutex::new(None),
             local_usage: tokio::sync::Mutex::new(None),
         })
     }
@@ -183,10 +203,47 @@ impl AppState {
             .lock()
             .expect("config lock")
             .enabled_accounts_ordered();
+        let signature = snapshot_signature(&accounts);
 
+        // Hold the async lock across the fetch so two webviews mounting together
+        // collapse into one provider fan-out. Only reuse the result for a tiny
+        // burst window; this is de-dupe, not a user-visible freshness cache.
+        let mut live_snapshots = self.live_snapshots.lock().await;
+        if live_snapshots
+            .as_ref()
+            .is_some_and(|(_, cached_signature, _)| cached_signature != &signature)
+        {
+            // An account edit can mean a new API key or a newly re-authenticated
+            // CLI identity. Never carry last-known-good data across that revision:
+            // a failed fetch with the new credential must be visible as an error.
+            self.last_good_snapshots
+                .lock()
+                .expect("last good snapshots lock")
+                .clear();
+        }
+        if let Some((fetched_at, cached_signature, cached_snapshots)) = live_snapshots.as_ref()
+            && cached_signature == &signature
+            && fetched_at.elapsed() < LIVE_REFRESH_BURST_WINDOW
+        {
+            return cached_snapshots.clone();
+        }
+
+        // A new client makes non-AWS provider reads genuinely fresh on every
+        // dashboard cycle instead of inheriting the old five-minute cache. AWS
+        // deliberately stays on the long-lived client to preserve the paid Cost
+        // Explorer protection already enforced by ProviderClient.
+        let fresh_provider_client = ProviderClient::new();
+        let active_ids: HashSet<String> = accounts
+            .iter()
+            .map(|account| account.id.clone())
+            .collect();
         let mut tasks = Vec::with_capacity(accounts.len());
         for (index, account) in accounts.into_iter().enumerate() {
-            let provider_client = self.provider_client.clone();
+            let provider_client = if account.provider == ProviderKind::Aws {
+                self.provider_client.clone()
+            } else {
+                fresh_provider_client.clone()
+            };
             let task_account = account.clone();
             let handle =
                 tokio::spawn(async move { provider_client.refresh_account(&task_account).await });
@@ -207,11 +264,19 @@ impl AppState {
             }
         }
         snapshots.sort_by_key(|(index, _)| *index);
-        let snapshots: Vec<UsageSnapshot> = snapshots
-            .into_iter()
-            .map(|(_, snapshot)| snapshot)
-            .collect();
+        let snapshots: Vec<UsageSnapshot> = {
+            let mut last_good = self
+                .last_good_snapshots
+                .lock()
+                .expect("last good snapshots lock");
+            last_good.retain(|account_id, _| active_ids.contains(account_id));
+            snapshots
+                .into_iter()
+                .map(|(_, snapshot)| stabilize_snapshot(&mut last_good, snapshot))
+                .collect()
+        };
         self.persist_discovered_emails(&snapshots);
+        *live_snapshots = Some((Instant::now(), signature, snapshots.clone()));
         snapshots
     }
 
@@ -693,6 +758,50 @@ impl AppState {
     }
 }
 
+fn snapshot_signature(accounts: &[AccountConfig]) -> String {
+    accounts
+        .iter()
+        .map(|account| {
+            format!(
+                "{}:{}:{}",
+                account.provider.as_str(),
+                account.id,
+                account.updated_at.timestamp_millis()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn stabilize_snapshot(
+    last_good: &mut HashMap<String, UsageSnapshot>,
+    snapshot: UsageSnapshot,
+) -> UsageSnapshot {
+    if snapshot.status == SnapshotStatus::Error {
+        if let Some(mut previous) = last_good.get(&snapshot.account_id).cloned() {
+            let refresh_error = snapshot
+                .message
+                .as_deref()
+                .unwrap_or("provider refresh failed");
+            let message = match previous.message.take() {
+                Some(previous_message) if !previous_message.is_empty() => {
+                    format!("{previous_message} · stale: {refresh_error}")
+                }
+                _ => format!("Last known good data · refresh failed: {refresh_error}"),
+            };
+            previous.status = SnapshotStatus::Stale;
+            previous.message = Some(message);
+            return previous;
+        }
+        return snapshot;
+    }
+
+    if snapshot.status != SnapshotStatus::Stale {
+        last_good.insert(snapshot.account_id.clone(), snapshot.clone());
+    }
+    snapshot
+}
+
 fn provider_supports_login(provider: ProviderKind) -> bool {
     matches!(provider, ProviderKind::ClaudeCode | ProviderKind::Codex)
 }
@@ -746,5 +855,84 @@ fn cleanup_managed_dir(dir: Option<&str>) {
         if config::is_managed_cli_dir(path) {
             let _ = fs::remove_dir_all(path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+
+    use crate::models::{QuotaSnapshot, SubscriptionPlan, SubscriptionSnapshot};
+
+    fn snapshot(status: SnapshotStatus, message: Option<&str>) -> UsageSnapshot {
+        UsageSnapshot {
+            account_id: "account-1".to_string(),
+            provider: ProviderKind::OpenRouter,
+            label: "OpenRouter".to_string(),
+            status,
+            email: None,
+            subscription: Some(SubscriptionSnapshot {
+                plan: SubscriptionPlan::Pro,
+                plan_label: "Pro".to_string(),
+                rate_limit_tier: None,
+                extra_usage_enabled: None,
+                source: "test".to_string(),
+            }),
+            usage_buckets: Vec::new(),
+            quota: Some(QuotaSnapshot {
+                used: 4.0,
+                limit: Some(10.0),
+                remaining: Some(6.0),
+                unit: "USD".to_string(),
+                reset_at: None,
+            }),
+            message: message.map(str::to_string),
+            fetched_at: Utc.with_ymd_and_hms(2026, 9, 1, 12, 0, 0).unwrap(),
+        }
+    }
+
+    #[test]
+    fn refresh_error_reuses_last_good_snapshot_as_stale() {
+        let mut last_good = HashMap::new();
+        let good = snapshot(SnapshotStatus::Healthy, None);
+        let original_time = good.fetched_at;
+        let stored = stabilize_snapshot(&mut last_good, good);
+        assert_eq!(stored.status, SnapshotStatus::Healthy);
+
+        let stale = stabilize_snapshot(
+            &mut last_good,
+            snapshot(SnapshotStatus::Error, Some("provider unavailable")),
+        );
+        assert_eq!(stale.status, SnapshotStatus::Stale);
+        assert_eq!(stale.fetched_at, original_time);
+        assert_eq!(stale.quota.as_ref().unwrap().remaining, Some(6.0));
+        assert!(stale.message.unwrap().contains("provider unavailable"));
+    }
+
+    #[test]
+    fn later_success_replaces_last_good_snapshot() {
+        let mut last_good = HashMap::new();
+        let first = snapshot(SnapshotStatus::Healthy, None);
+        stabilize_snapshot(&mut last_good, first);
+
+        let mut second = snapshot(SnapshotStatus::Warning, Some("new data"));
+        second.quota.as_mut().unwrap().remaining = Some(1.0);
+        stabilize_snapshot(&mut last_good, second.clone());
+
+        assert_eq!(
+            last_good
+                .get("account-1")
+                .unwrap()
+                .quota
+                .as_ref()
+                .unwrap()
+                .remaining,
+            Some(1.0)
+        );
+        assert_eq!(
+            last_good.get("account-1").unwrap().status,
+            SnapshotStatus::Warning
+        );
     }
 }
