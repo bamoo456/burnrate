@@ -122,8 +122,10 @@ export function Preferences({
     <main className="prefs-shell">
       <header className="prefs-header">
         <div>
-          <h1>Preferences</h1>
-          <p>{summary.label}</p>
+          <h1>Usage Dashboard</h1>
+          <p>
+            {summary.label} · refreshed {formatAgo(summary.updatedAt)}
+          </p>
         </div>
         <div className="toolbar">
           <button
@@ -194,13 +196,25 @@ export function Preferences({
         </aside>
 
         <section className="prefs-main" aria-label="Usage and account settings">
+          {accounts.length > 0 || snapshots.length > 0 ? (
+            <DashboardOverview
+              accounts={accounts}
+              snapshots={snapshots}
+              summary={summary}
+            />
+          ) : null}
+
           {accounts.length === 0 && snapshots.length === 0 && !busy ? (
             <FirstRunPanel onAdd={() => setModal({ kind: "add" })} />
           ) : (
             <section className="prefs-usage">
               <SectionTitle
-                title="Usage"
-                detail={snapshots.length > 0 ? summary.shortLabel : "Idle"}
+                title="Live usage"
+                detail={
+                  snapshots.length > 0
+                    ? `${snapshots.length} account${snapshots.length === 1 ? "" : "s"}`
+                    : "Idle"
+                }
               />
               <div className="usage-list">
                 {snapshots.map((snapshot) => (
@@ -246,6 +260,52 @@ export function Preferences({
         />
       ) : null}
     </main>
+  );
+}
+
+function DashboardOverview({
+  accounts,
+  snapshots,
+  summary,
+}: {
+  accounts: AccountView[];
+  snapshots: UsageSnapshot[];
+  summary: Summary;
+}) {
+  const enabledCount = accounts.filter((account) => account.enabled).length;
+  const healthyCount = snapshots.filter(
+    (snapshot) => snapshot.status === "healthy",
+  ).length;
+  const staleCount = snapshots.filter(
+    (snapshot) => snapshot.status === "stale",
+  ).length;
+
+  return (
+    <section className="prefs-usage" aria-label="Dashboard overview">
+      <SectionTitle
+        title="Overview"
+        detail={`Refreshed ${formatAgo(summary.updatedAt)}`}
+      />
+      <div className="usage-list">
+        <article className={`usage-row ${summary.status}`}>
+          <div className="usage-head">
+            <div className="usage-provider">
+              <span>
+                <strong>
+                  {enabledCount} enabled account{enabledCount === 1 ? "" : "s"}
+                </strong>
+                <small>
+                  {healthyCount} healthy · {summary.warningCount} warning ·{" "}
+                  {summary.criticalCount} critical
+                  {staleCount > 0 ? ` · ${staleCount} stale` : ""}
+                </small>
+              </span>
+            </div>
+            <StatusBadge status={summary.status} />
+          </div>
+        </article>
+      </div>
+    </section>
   );
 }
 
@@ -471,11 +531,10 @@ function UsageRow({ snapshot }: { snapshot: UsageSnapshot }) {
             {snapshot.email ? (
               <small className="account-email">{snapshot.email}</small>
             ) : null}
-            {hasAwsCostData(snapshot) ? (
-              <small className="snapshot-freshness">
-                AWS cost data · {formatAgo(snapshot.fetchedAt)}
-              </small>
-            ) : null}
+            <small className="snapshot-freshness">
+              {hasAwsCostData(snapshot) ? "AWS cost data" : "Updated"} ·{" "}
+              {formatAgo(snapshot.fetchedAt)}
+            </small>
           </span>
         </div>
         <StatusBadge status={snapshot.status} />
