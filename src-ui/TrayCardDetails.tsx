@@ -1,5 +1,6 @@
 import { BarSeries } from "./Sparkline";
 import {
+  balanceBuckets,
   displayBuckets,
   formatAgo,
   formatLimit,
@@ -23,8 +24,9 @@ export function TrayCardDetails({
   localUsage: ProviderLocalUsage | null;
 }) {
   const shown = new Set(displayBuckets(snapshot).map((bucket) => bucket.id));
+  const balances = new Set(balanceBuckets(snapshot).map((bucket) => bucket.id));
   const hiddenBuckets = snapshot.usageBuckets.filter(
-    (bucket) => !shown.has(bucket.id),
+    (bucket) => !shown.has(bucket.id) && !balances.has(bucket.id),
   );
   const tier = snapshot.subscription?.rateLimitTier ?? null;
 
