@@ -5,7 +5,8 @@ export type ProviderKind =
   | "opencode-go"
   | "runpod"
   | "aws"
-  | "copilot";
+  | "copilot"
+  | "antigravity";
 export type CopilotPlan =
   | "free"
   | "pro"

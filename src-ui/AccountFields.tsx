@@ -31,6 +31,7 @@ export function AccountFields({
   const isAwsProvider = form.provider === "aws";
   const isCopilotProvider = form.provider === "copilot";
   const isOpenRouterProvider = form.provider === "openrouter";
+  const isAntigravityProvider = form.provider === "antigravity";
 
   return (
     <>
@@ -52,6 +53,13 @@ export function AccountFields({
         <AwsFields form={form} setForm={setForm} />
       ) : isCopilotProvider ? (
         <CopilotFields form={form} setForm={setForm} isEdit={isEdit} />
+      ) : isAntigravityProvider ? (
+        <p className="form-help">
+          Antigravity has no API key. Burnrate reads your quota through the{" "}
+          <code>agy</code> CLI, so install it and run <code>agy</code> once in a
+          terminal to sign in. Quota covers every Antigravity account signed in
+          to that CLI on this Mac.
+        </p>
       ) : (
         <>
           <p className="form-help">

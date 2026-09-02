@@ -6,9 +6,9 @@
 ## Overview
 
 Burnrate is a macOS-first menu-bar app that monitors remaining quota/credits
-across Claude Code, Codex, GitHub Copilot, OpenRouter, Runpod, and AWS Cost
-Explorer spend (with multiple accounts per provider for Claude Code and
-Codex), plus claudex-powered **local usage insights** (per-provider daily
+across Claude Code, Codex, GitHub Copilot, Antigravity, OpenRouter, Runpod,
+and AWS Cost Explorer spend (with multiple accounts per provider for Claude
+Code and Codex), plus claudex-powered **local usage insights** (per-provider daily
 cost, projections, model/project breakdowns from local CLI session logs).
 It is a
 **Tauri 2** app: a Rust
@@ -137,7 +137,7 @@ burnrate`).
   `OPENAI_API_KEY`, …) stripped via `strip_credential_env` — an inherited agent
   token (e.g. from a cmux surface) otherwise makes `claude auth status` report
   env auth with no subscription/email, breaking verify, fetch, and detection.
-- `providers/{claude,codex,copilot,openrouter,runpod,aws}.rs` — each implements
+- `providers/{claude,codex,copilot,antigravity,openrouter,runpod,aws}.rs` — each implements
   `fetch()`, and
   claude/codex/copilot also implement `detect()`. claude reads `~/.claude` creds +
   macOS Keychain (service name derived per account via
@@ -183,6 +183,30 @@ burnrate`).
   missing token — or a billing-API failure — surfaces an error snapshot asking
   for one rather than silently degrading to a count derived from local session
   logs. Every message still states which source produced the number.
+- `providers/antigravity.rs` — Google Antigravity quota. Antigravity ships no
+  public quota API, so this drives the `agy` CLI's embedded Connect-RPC
+  language server on an ephemeral **loopback** HTTPS port:
+  `RetrieveUserQuotaSummary` returns the same two groups the IDE's Model Quota
+  UI shows (Gemini, Claude + GPT), each with a weekly and a five-hour bucket,
+  and `GetUserStatus` adds email + plan (a `GetUserStatus` failure degrades to
+  quota-only rather than losing the numbers). `agy` is a Bubble Tea TUI that
+  exits without a controlling terminal and serves quota only while alive, so a
+  fetch spawns it under a PTY (`script -q /dev/null agy`), polls until an
+  endpoint actually **answers** (a fresh process binds its port before the
+  service is ready; 35s deadline), reads, then tears it down — reusing an
+  `agy` the user already runs and never killing that one. Ports come from
+  `lsof` on the `agy` pid (it opens more than one; only one serves quota).
+  `remainingFraction` is modelled as a percentage (`limit: 100`, unit `%`) so
+  the shared meters and Warning/Exhausted thresholds apply unchanged; the
+  Gemini pair takes the bare `5-hour` / `Weekly` labels that win the dashboard
+  columns and the Claude + GPT pair renders as extras. The local client sets
+  `danger_accept_invalid_certs` for the CLI's self-signed cert and must never
+  be used for a remote host. Binary lookup honors `BURNRATE_AGY_BIN` /
+  `ANTIGRAVITY_CLI_PATH`. Scope: CLI source only — the desktop
+  `language_server` probe (needs a `--csrf_token` scraped from process args),
+  the IDE server (404s on `RetrieveUserQuotaSummary`), and the
+  `cloudcode-pa.googleapis.com` OAuth path (needs a client secret extracted
+  from the app bundle) are follow-ups.
 - `providers/login.rs` — interactive sign-in. Shells out to `claude auth login`
   / `codex login` under the account's config dir, streams an **allowlist-redacted**
   view of CLI output (surfacing the auth URL, masking token-shaped lines) via the
@@ -245,7 +269,8 @@ burnrate`).
   opens the dialog) and renders the banner. Multi-account:
   each account shows its email; the Add-account menu offers browser sign-in vs.
   manual token entry for Claude Code / Codex (plus API-key entry for
-  OpenRouter/Runpod and profile-based AWS setup). `LoginModal` includes the
+  OpenRouter/Runpod, profile-based AWS setup, and a no-secret Antigravity
+  form whose help text points at the `agy` CLI). `LoginModal` includes the
   paste-the-auth-code step (`needsCode`) that Claude sign-in requires.
 
 ### Docs site (`website/`, VitePress)

@@ -13,6 +13,7 @@ pub(crate) enum ProviderKind {
     Runpod,
     Aws,
     Copilot,
+    Antigravity,
 }
 
 impl ProviderKind {
@@ -25,6 +26,7 @@ impl ProviderKind {
             ProviderKind::Runpod => "runpod",
             ProviderKind::Aws => "aws",
             ProviderKind::Copilot => "copilot",
+            ProviderKind::Antigravity => "antigravity",
         }
     }
 
@@ -39,6 +41,7 @@ impl ProviderKind {
             ProviderKind::Runpod => "Runpod",
             ProviderKind::Aws => "AWS",
             ProviderKind::Copilot => "GitHub Copilot",
+            ProviderKind::Antigravity => "Antigravity",
         }
     }
 }
@@ -467,6 +470,7 @@ mod tests {
         assert_eq!(ProviderKind::Runpod.as_str(), "runpod");
         assert_eq!(ProviderKind::Aws.as_str(), "aws");
         assert_eq!(ProviderKind::Copilot.as_str(), "copilot");
+        assert_eq!(ProviderKind::Antigravity.as_str(), "antigravity");
         assert_eq!(
             serde_json::to_string(&ProviderKind::OpenRouter).unwrap(),
             "\"openrouter\""
