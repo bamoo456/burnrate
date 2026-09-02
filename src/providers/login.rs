@@ -342,6 +342,9 @@ async fn run_login_inner(
                 },
             };
             let Some(line) = line else { continue };
+            // Provider CLIs emit ANSI colour and OSC 8 hyperlinks. Strip them
+            // once, before both the URL scan and the redactor.
+            let line = strip_escapes(&line);
             if let Some(url) = extract_url(&line).filter(|url| is_allowed_auth_url(url)) {
                 if open_browser && !opened {
                     open_url(&url);
@@ -433,6 +436,53 @@ async fn verify(provider: ProviderKind, config_dir: Option<&str>) -> Result<Opti
     }
 }
 
+/// Remove ANSI escape sequences from a CLI output line.
+///
+/// `claude auth login` wraps its auth URL in an OSC 8 hyperlink —
+/// `ESC ] 8 ; ; <url> ESC \ <label> ESC ] 8 ; ; ESC \` — where the label is a
+/// second copy of the URL. The escaped target contains no whitespace, so an
+/// unstripped line makes [`extract_url`] swallow both copies plus the escapes
+/// into one unparseable string, and leaks the raw control bytes to the UI.
+/// Dropping the escape sequences leaves the human-visible label, i.e. the URL.
+fn strip_escapes(line: &str) -> String {
+    const ESC: char = '\u{1b}';
+    const BEL: char = '\u{7}';
+
+    let mut out = String::with_capacity(line.len());
+    let mut chars = line.chars();
+    while let Some(ch) = chars.next() {
+        if ch != ESC {
+            out.push(ch);
+            continue;
+        }
+        match chars.next() {
+            // CSI (colour, cursor moves): parameters then a final byte @..~.
+            Some('[') => {
+                for ch in chars.by_ref() {
+                    if ('@'..='~').contains(&ch) {
+                        break;
+                    }
+                }
+            }
+            // String-terminated sequences (OSC/DCS/PM/APC): run to BEL or ST.
+            Some(']' | 'P' | '^' | '_') => {
+                while let Some(ch) = chars.next() {
+                    if ch == BEL {
+                        break;
+                    }
+                    // ST is `ESC \`; consume the backslash with it.
+                    if ch == ESC && chars.next() == Some('\\') {
+                        break;
+                    }
+                }
+            }
+            // Lone ESC, or a two-character sequence: drop it.
+            _ => {}
+        }
+    }
+    out
+}
+
 /// Find the first `https://` URL in a line, trimming trailing punctuation.
 fn extract_url(line: &str) -> Option<String> {
     let start = line.find("https://")?;
@@ -454,9 +504,17 @@ fn is_allowed_auth_url(value: &str) -> bool {
     let Some(host) = url.host_str().map(|host| host.to_ascii_lowercase()) else {
         return false;
     };
-    ["openai.com", "chatgpt.com", "claude.ai", "anthropic.com"]
-        .iter()
-        .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
+    // `claude` 2.x authorizes on claude.com and redirects via
+    // platform.claude.com; older builds used claude.ai. Keep both.
+    [
+        "openai.com",
+        "chatgpt.com",
+        "claude.ai",
+        "claude.com",
+        "anthropic.com",
+    ]
+    .iter()
+    .any(|domain| host == *domain || host.ends_with(&format!(".{domain}")))
 }
 
 /// True if a line looks like it carries a secret (token, key, or JWT).
@@ -523,11 +581,51 @@ mod tests {
         assert_eq!(extract_url("http://insecure.example"), None);
     }
 
+    /// Verbatim shape of `claude auth login` 2.1.x output: the URL is an OSC 8
+    /// hyperlink whose target and label are both the full URL, with no
+    /// whitespace between them.
+    #[test]
+    fn strips_osc8_hyperlink_so_the_real_auth_url_survives() {
+        let url = "https://claude.com/cai/oauth/authorize?code=true&state=ABC";
+        let line = format!(
+            "If the browser didn't open, visit: \u{1b}]8;;{url}\u{1b}\\{url}\u{1b}]8;;\u{1b}\\"
+        );
+
+        // Unstripped, the whitespace scan swallows both copies plus the escapes.
+        assert_ne!(extract_url(&line).as_deref(), Some(url));
+
+        let stripped = strip_escapes(&line);
+        assert_eq!(
+            stripped,
+            format!("If the browser didn't open, visit: {url}")
+        );
+        assert_eq!(extract_url(&stripped).as_deref(), Some(url));
+        assert!(is_allowed_auth_url(url));
+    }
+
+    #[test]
+    fn strips_csi_colour_codes_without_eating_text() {
+        assert_eq!(
+            strip_escapes("\u{1b}[1m\u{1b}[92mOpening browser…\u{1b}[0m"),
+            "Opening browser…"
+        );
+        assert_eq!(strip_escapes("plain line"), "plain line");
+    }
+
     #[test]
     fn auth_url_allowlist_rejects_lookalikes_and_unrelated_hosts() {
         assert!(is_allowed_auth_url("https://auth.openai.com/device"));
         assert!(is_allowed_auth_url("https://claude.ai/oauth/authorize"));
+        assert!(is_allowed_auth_url(
+            "https://claude.com/cai/oauth/authorize"
+        ));
+        assert!(is_allowed_auth_url(
+            "https://platform.claude.com/oauth/code/callback"
+        ));
         assert!(is_allowed_auth_url("https://console.anthropic.com/oauth"));
+        assert!(!is_allowed_auth_url(
+            "https://claude.com.evil.example/login"
+        ));
         assert!(!is_allowed_auth_url(
             "https://openai.com.evil.example/login"
         ));
