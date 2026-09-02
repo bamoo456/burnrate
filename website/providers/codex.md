@@ -8,8 +8,8 @@ from the Codex app server over stdio — the same data the Codex UI shows.
 
 - The `codex` CLI installed and signed in.
 
-Accounts are auto-detected from `CODEX_HOME` / `~/.codex`. The account
-email comes from the local `auth.json` identity token.
+Accounts are added explicitly (this fork does not auto-detect them). The
+account email comes from the local `auth.json` identity token.
 
 ## Multiple accounts
 

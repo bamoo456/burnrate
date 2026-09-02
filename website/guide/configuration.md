@@ -35,13 +35,16 @@ delayed and every paginated API request is billable.
 
 ## Environment variables
 
-| Variable                             | Purpose                                                      |
-| ------------------------------------ | ------------------------------------------------------------ |
-| `BURNRATE_CONFIG_DIR`                | Override the config directory.                               |
-| `BURNRATE_CLAUDE_BIN` / `CLAUDE_BIN` | Path to the `claude` CLI if it isn't in a standard location. |
-| `BURNRATE_CODEX_BIN` / `CODEX_BIN`   | Path to the `codex` CLI if it isn't in a standard location.  |
-| `BURNRATE_RUNPOD_REST_URL`           | Override the Runpod REST endpoint (development/proxies).     |
-| `BURNRATE_RUNPOD_GRAPHQL_URL`        | Override the Runpod GraphQL endpoint (development/proxies).  |
+| Variable                                    | Purpose                                                        |
+| ------------------------------------------- | -------------------------------------------------------------- |
+| `BURNRATE_CONFIG_DIR`                       | Override the config directory.                                 |
+| `BURNRATE_CLAUDE_BIN` / `CLAUDE_BIN`        | Path to the `claude` CLI if it isn't in a standard location.   |
+| `BURNRATE_CODEX_BIN` / `CODEX_BIN`          | Path to the `codex` CLI if it isn't in a standard location.    |
+| `BURNRATE_RUNPOD_REST_URL`                  | Override the Runpod REST endpoint (development/proxies).       |
+| `BURNRATE_RUNPOD_GRAPHQL_URL`               | Override the Runpod GraphQL endpoint (development/proxies).    |
+| `BURNRATE_AGY_BIN` / `ANTIGRAVITY_CLI_PATH` | Path to the `agy` CLI if it isn't in a standard location.      |
+| `BURNRATE_OPENCODE_GO_USAGE_URL`            | Override the OpenCode Go usage endpoint (development/proxies). |
+| `BURNRATE_GITHUB_API_URL`                   | Override the GitHub API base (development/testing).            |
 
 Burnrate strips inherited credential environment variables
 (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, …) from

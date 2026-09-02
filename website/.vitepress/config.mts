@@ -1,11 +1,11 @@
 import { defineConfig } from "vitepress";
 
-const SITE_URL = "https://jamesbrink.online/burnrate/";
+const SITE_URL = "https://bamoo456.github.io/burnrate/";
 
 export default defineConfig({
   title: "Burnrate",
   description:
-    "Menu-bar usage monitor for Claude Code, Codex, OpenRouter, Runpod, and AWS — quotas, credits, spend, and subscription limits at a glance.",
+    "Menu-bar usage monitor for Claude Code, Codex, GitHub Copilot, Antigravity, OpenCode Go, OpenRouter, Runpod, and AWS — quotas, credits, spend, and subscription limits at a glance.",
   base: "/burnrate/",
   lang: "en-US",
   cleanUrls: true,
@@ -41,11 +41,19 @@ export default defineConfig({
     logo: "/logo.svg",
 
     nav: [
-      { text: "Guide", link: "/guide/what-is-burnrate", activeMatch: "/guide/" },
-      { text: "Providers", link: "/providers/claude-code", activeMatch: "/providers/" },
+      {
+        text: "Guide",
+        link: "/guide/what-is-burnrate",
+        activeMatch: "/guide/",
+      },
+      {
+        text: "Providers",
+        link: "/providers/claude-code",
+        activeMatch: "/providers/",
+      },
       {
         text: "Download",
-        link: "https://github.com/jamesbrink/burnrate/releases/latest",
+        link: "https://github.com/bamoo456/burnrate/releases/latest",
       },
     ],
 
@@ -57,7 +65,6 @@ export default defineConfig({
           { text: "Installation", link: "/guide/installation" },
           { text: "Getting Started", link: "/guide/getting-started" },
           { text: "Configuration", link: "/guide/configuration" },
-          { text: "Local Insights", link: "/guide/local-insights" },
           { text: "Troubleshooting", link: "/guide/troubleshooting" },
         ],
       },
@@ -67,6 +74,8 @@ export default defineConfig({
           { text: "Claude Code", link: "/providers/claude-code" },
           { text: "Codex", link: "/providers/codex" },
           { text: "GitHub Copilot", link: "/providers/github-copilot" },
+          { text: "Antigravity", link: "/providers/antigravity" },
+          { text: "OpenCode Go", link: "/providers/opencode-go" },
           { text: "OpenRouter", link: "/providers/openrouter" },
           { text: "Runpod", link: "/providers/runpod" },
           { text: "AWS", link: "/providers/aws" },
@@ -75,19 +84,20 @@ export default defineConfig({
     ],
 
     socialLinks: [
-      { icon: "github", link: "https://github.com/jamesbrink/burnrate" },
+      { icon: "github", link: "https://github.com/bamoo456/burnrate" },
     ],
 
     search: { provider: "local" },
 
     editLink: {
-      pattern: "https://github.com/jamesbrink/burnrate/edit/main/website/:path",
+      pattern: "https://github.com/bamoo456/burnrate/edit/main/website/:path",
       text: "Edit this page on GitHub",
     },
 
     footer: {
       message: "Released under the MIT License.",
-      copyright: "Copyright © 2025-present James Brink",
+      copyright:
+        "Copyright © 2025-present James Brink · fork maintained by bamoo456",
     },
   },
 });

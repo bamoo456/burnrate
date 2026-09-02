@@ -2,10 +2,8 @@
 
 ## First launch
 
-On first launch Burnrate auto-detects existing **Claude Code** and **Codex**
-accounts from their local CLI config (`~/.claude`, `~/.codex` /
-`CODEX_HOME`). If you already use either CLI, your account shows up with its
-email and usage — nothing to configure.
+Burnrate starts with no accounts. It never scans your filesystem to discover
+them, so every account is added explicitly — see [Adding accounts](#adding-accounts).
 
 The tray icon appears in the menu bar; left-click for the usage popover,
 right-click for Preferences, Refresh, and Quit.
@@ -21,24 +19,32 @@ and use **Add account**:
   shown in the browser at the end and paste it into the login dialog.
 - **Manual token** (Claude Code, Codex) — paste an existing OAuth token
   instead of signing in.
-- **API key** (OpenRouter, Runpod) — paste the provider API key.
+- **API key** (OpenRouter, Runpod, OpenCode Go) — paste the provider API key.
+- **GitHub Copilot** — pick your plan and paste a GitHub personal access token
+  (classic). See the [Copilot provider page](/providers/github-copilot).
+- **Antigravity** — no key to enter; sign in once with the `agy` CLI and
+  Burnrate reads your quota from it. See the
+  [Antigravity provider page](/providers/antigravity).
 - **AWS** — pick a credential profile (or leave blank for the default
   chain). See the [AWS provider page](/providers/aws).
 
 ### Multiple accounts
 
-Extra Claude Code and Codex accounts are isolated in their own CLI config
-dirs under `<config-dir>/cli/<provider>/<id>`, so your first auto-detected
-account keeps using the shared terminal session (`~/.claude`, `~/.codex`)
-while additional accounts stay separate. Signing in the same email twice
-refreshes the existing account instead of creating a duplicate.
+Claude Code and Codex accounts added through browser sign-in each get their
+own isolated CLI config dir under `<config-dir>/cli/<provider>/<id>`, so they
+never disturb the shared terminal session in `~/.claude` / `~/.codex`.
+Signing in the same email twice refreshes the existing account instead of
+creating a duplicate.
+
+Antigravity is the exception: its quota comes from whichever account the `agy`
+CLI is currently signed in as, so it is effectively single-account.
 
 ### Re-authenticating
 
 **Sign in again** (in an account's edit panel) re-authenticates that account
-in place. For the auto-detected account this refreshes your real `~/.claude`
-/ `~/.codex` session — it doubles as the fix for a stale or expired default
-login.
+in place, in its own isolated CLI dir. It is the fix for a stale or expired
+login. Burnrate never re-authenticates your system-default `~/.claude` /
+`~/.codex` session — that belongs to your own terminal.
 
 ### Removing accounts
 
