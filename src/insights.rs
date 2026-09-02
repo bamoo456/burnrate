@@ -486,7 +486,11 @@ mod tests {
             )
         });
         assert!(report.available, "report: {:?}", report.message);
-        assert_eq!(report.providers.len(), 1, "API providers have no local source");
+        assert_eq!(
+            report.providers.len(),
+            1,
+            "API providers have no local source"
+        );
         let usage = &report.providers[0];
         assert_eq!(usage.provider, ProviderKind::Copilot);
         assert_eq!(usage.today_sessions, 1);

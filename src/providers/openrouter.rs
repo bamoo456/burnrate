@@ -181,7 +181,10 @@ mod tests {
 
         let mut account = account();
         account.endpoint_override = Some(server.uri());
-        let error = fetch(&Client::new(), &account).await.unwrap_err().to_string();
+        let error = fetch(&Client::new(), &account)
+            .await
+            .unwrap_err()
+            .to_string();
 
         assert!(error.contains("Management key"));
         assert!(error.contains("403"));

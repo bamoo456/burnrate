@@ -113,7 +113,10 @@ burnrate`).
   windows, DST-safe), linear month-end projection, month token totals, model
   distribution, top projects, and a 14-day daily series for sparklines.
   `copilot_premium_requests_mtd` sums `premium_requests` from Copilot session
-  `extras` with a Copilot-scoped sync. `test_support` provides the hermetic
+  `extras` with a Copilot-scoped sync — but, like `collect_local_usage`, it is
+  gated off by `local_session_scanning_disabled` in this fork and returns an
+  error directing the caller to configure a GitHub token. `test_support`
+  provides the hermetic
   env helpers (`with_claudex_env`, fixture writer) that keep tests from ever
   touching the real `~/.claudex`.
 - `models.rs` — every serde wire type shared with the UI. Structs are
@@ -171,14 +174,15 @@ burnrate`).
   1st, 00:00 UTC) against the account's configured plan allowance
   (`CopilotPlan::monthly_limit`, or a custom limit): detection requires a
   non-empty `~/.copilot/session-state` (`CLAUDEX_COPILOT_DIR` override —
-  deliberately shared with claudex so detection and indexing agree); without
-  credentials the count is a **local lower-bound estimate** via
-  `insights::copilot_premium_requests_mtd`, and with an optional GitHub token
-  (classic PAT — billing endpoints reject fine-grained tokens) it sums
-  `usageItems[].grossQuantity` from the enhanced-billing premium-request
-  report (`BURNRATE_GITHUB_API_URL` override for wiremock). A billing-API
-  failure falls back to the local estimate with a note instead of an error
-  snapshot, and every message states which source produced the number.
+  deliberately shared with claudex so detection and indexing agree). A GitHub
+  token (classic PAT — billing endpoints reject fine-grained tokens) is
+  **required**: it sums `usageItems[].grossQuantity` from the enhanced-billing
+  premium-request report (`BURNRATE_GITHUB_API_URL` override for wiremock).
+  The local lower-bound estimate via `insights::copilot_premium_requests_mtd`
+  is **disabled in this fork** (see `local_session_scanning_disabled`), so a
+  missing token — or a billing-API failure — surfaces an error snapshot asking
+  for one rather than silently degrading to a count derived from local session
+  logs. Every message still states which source produced the number.
 - `providers/login.rs` — interactive sign-in. Shells out to `claude auth login`
   / `codex login` under the account's config dir, streams an **allowlist-redacted**
   view of CLI output (surfacing the auth URL, masking token-shaped lines) via the

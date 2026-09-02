@@ -1,17 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { ProviderLogo } from "./ProviderLogo";
-import type { ProviderKind } from "./types";
+import { providerLabels } from "./constants";
 import type { LoginSession } from "./useLogin";
-
-const providerNames: Record<ProviderKind, string> = {
-  "claude-code": "Claude Code",
-  codex: "Codex",
-  aws: "AWS",
-  openrouter: "OpenRouter",
-  runpod: "Runpod",
-  copilot: "GitHub Copilot",
-};
 
 /**
  * Presentational sign-in modal. All state lives in {@link useLogin}; this only
@@ -59,12 +50,12 @@ export function LoginModal({
         className="login-modal"
         role="dialog"
         aria-modal="true"
-        aria-label={`Sign in to ${providerNames[session.provider]}`}
+        aria-label={`Sign in to ${providerLabels[session.provider]}`}
         onClick={(event) => event.stopPropagation()}
       >
         <header className="login-modal-head">
           <ProviderLogo provider={session.provider} size="md" />
-          <h2>Sign in to {providerNames[session.provider]}</h2>
+          <h2>Sign in to {providerLabels[session.provider]}</h2>
         </header>
 
         {failed ? (
@@ -90,7 +81,7 @@ export function LoginModal({
                 <span>
                   Sign in with the account you want to <em>add</em>.
                   Re-authorizing an account that’s already signed in elsewhere
-                  (such as your terminal {providerNames[session.provider]}) can
+                  (such as your terminal {providerLabels[session.provider]}) can
                   sign it out and force a re-login there. To add a different
                   account, switch accounts in the browser first.
                 </span>

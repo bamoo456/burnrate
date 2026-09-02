@@ -528,7 +528,9 @@ mod tests {
         assert!(is_allowed_auth_url("https://auth.openai.com/device"));
         assert!(is_allowed_auth_url("https://claude.ai/oauth/authorize"));
         assert!(is_allowed_auth_url("https://console.anthropic.com/oauth"));
-        assert!(!is_allowed_auth_url("https://openai.com.evil.example/login"));
+        assert!(!is_allowed_auth_url(
+            "https://openai.com.evil.example/login"
+        ));
         assert!(!is_allowed_auth_url("https://auth.example/login"));
         assert!(!is_allowed_auth_url("http://openai.com/login"));
     }

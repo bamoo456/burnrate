@@ -10,11 +10,7 @@ const DEFAULT_ENDPOINT: &str = "https://opencode.ai/zen/go/v1/usage";
 
 pub(crate) async fn fetch(http: &Client, account: &AccountConfig) -> Result<UsageSnapshot> {
     let token = require_token(account)?;
-    let url = endpoint(
-        account,
-        "BURNRATE_OPENCODE_GO_USAGE_URL",
-        DEFAULT_ENDPOINT,
-    )?;
+    let url = endpoint(account, "BURNRATE_OPENCODE_GO_USAGE_URL", DEFAULT_ENDPOINT)?;
     let value: serde_json::Value = http
         .get(url)
         .bearer_auth(token)

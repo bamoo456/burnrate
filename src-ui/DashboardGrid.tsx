@@ -114,7 +114,9 @@ function AccountIdentity({ snapshot }: { snapshot: UsageSnapshot }) {
             {extras.map((bucket) => (
               <span key={bucket.id}>
                 <b>{bucket.label}</b>
-                <small> · {formatDashboardMetric(bucket)}</small>
+                {/* The separator is drawn in CSS so the label and the value
+                    each stay an addressable text node of their own. */}
+                <small>{formatDashboardMetric(bucket)}</small>
               </span>
             ))}
           </div>
