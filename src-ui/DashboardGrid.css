@@ -126,6 +126,10 @@
   font-weight: 650;
 }
 
+.dashboard-extras small::before {
+  content: " \00b7 ";
+}
+
 .dashboard-extras small {
   display: inline;
   color: inherit;

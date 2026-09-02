@@ -499,7 +499,11 @@ mod tests {
     }
 
     #[test]
-    fn billing_failure_falls_back_to_local_estimate_with_a_note() {
+    fn billing_failure_surfaces_an_error_while_local_scanning_is_disabled() {
+        // PR #1 disabled local Copilot session scanning, so the documented
+        // "degrade to a local CLI estimate" path is no longer reachable: a
+        // dead token now fails the fetch instead of quietly showing a count
+        // derived from local session logs.
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -513,10 +517,9 @@ mod tests {
             17,
         );
 
-        // Hermetic claudex env (index + Copilot data root) for the local
-        // fallback path; a plain #[test] holding the env lock around
-        // block_on avoids holding it across an await.
-        let snapshot = crate::insights::test_support::with_claudex_env(
+        // Hermetic claudex env (index + Copilot data root) proves the failure
+        // is the disabled-scanning policy, not missing local session data.
+        let error = crate::insights::test_support::with_claudex_env(
             Some(state.path()),
             Some(copilot_home.path()),
             || {
@@ -532,19 +535,14 @@ mod tests {
                     account.endpoint_override = Some(server.uri());
                     account.plaintext_secret = Some("ghp_revoked".to_string());
 
-                    fetch(&Client::new(), &account).await.unwrap()
+                    fetch(&Client::new(), &account).await.unwrap_err()
                 })
             },
         );
 
-        assert_ne!(snapshot.status, SnapshotStatus::Error);
-        assert_eq!(snapshot.quota.as_ref().unwrap().used, 17.0);
-        let message = snapshot.message.as_deref().unwrap();
-        assert!(message.contains("GitHub billing unavailable"), "{message}");
-        assert!(message.contains("local CLI estimate"), "{message}");
-        assert_eq!(
-            snapshot.subscription.as_ref().unwrap().source,
-            "copilot-local-estimate"
+        assert!(
+            error.to_string().contains("configure a GitHub token"),
+            "{error}"
         );
     }
 }

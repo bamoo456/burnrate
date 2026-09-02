@@ -112,7 +112,9 @@ function dashboardWindowScore(
     if (label === "weekly") score += 80;
     if (bucketWindow === "weekly") score += 50;
     if (raw.includes("week")) score += 20;
-    if (bucket.limit !== null) score += 5;
+    // Tie-break between buckets that already matched this window; a bare
+    // limit must never promote an unrelated metric into the column.
+    if (score > 0 && bucket.limit !== null) score += 5;
     return score;
   }
 
@@ -122,8 +124,12 @@ function dashboardWindowScore(
   if (label === "monthly" || label.includes("month to date")) score += 80;
   if (bucketWindow === "monthly" || bucketWindow === "month to date") score += 50;
   if (raw.includes("month")) score += 20;
-  // Prefer an actual quota/budget total over attribution-only category rows.
-  if (bucket.limit !== null || bucket.remaining !== null) score += 20;
+  // Prefer an actual quota/budget total over attribution-only category rows —
+  // but only among buckets that already matched the monthly window, so a
+  // window-less metric (Runpod "Current burn") is not pulled in on its own.
+  if (score > 0 && (bucket.limit !== null || bucket.remaining !== null)) {
+    score += 20;
+  }
   return score;
 }
 

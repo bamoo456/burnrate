@@ -233,10 +233,8 @@ impl AppState {
         // deliberately stays on the long-lived client to preserve the paid Cost
         // Explorer protection already enforced by ProviderClient.
         let fresh_provider_client = ProviderClient::new();
-        let active_ids: HashSet<String> = accounts
-            .iter()
-            .map(|account| account.id.clone())
-            .collect();
+        let active_ids: HashSet<String> =
+            accounts.iter().map(|account| account.id.clone()).collect();
         let mut tasks = Vec::with_capacity(accounts.len());
         for (index, account) in accounts.into_iter().enumerate() {
             let provider_client = if account.provider == ProviderKind::Aws {

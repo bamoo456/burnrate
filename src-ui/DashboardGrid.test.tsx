@@ -10,8 +10,6 @@ function snapshot(
 ): UsageSnapshot {
   return {
     accountId: `${overrides.provider}-${overrides.label}`,
-    provider: overrides.provider,
-    label: overrides.label,
     status: "healthy",
     email: null,
     subscription: null,

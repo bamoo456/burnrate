@@ -116,7 +116,8 @@ export function Preferences({
         <div>
           <h1>Usage Dashboard</h1>
           <p>
-            {summary.label} · refreshed {formatAgo(summary.updatedAt)}
+            <span className="summary-label">{summary.label}</span> · refreshed{" "}
+            {formatAgo(summary.updatedAt)}
           </p>
         </div>
         <div className="toolbar">
