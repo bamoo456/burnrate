@@ -117,7 +117,30 @@ async fn rpc(http: &Client, port: u16, method: &str) -> Result<serde_json::Value
 async fn collect(http: &Client, account: &AccountConfig, port: u16) -> Result<UsageSnapshot> {
     let summary = rpc(http, port, "RetrieveUserQuotaSummary").await?;
     let status = rpc(http, port, "GetUserStatus").await.ok();
+    let reported = status.as_ref().and_then(account_email);
+    ensure_account_matches(account, reported.as_deref())?;
     parse_snapshot(account, &summary, status.as_ref())
+}
+
+/// Antigravity quota belongs to whichever account `agy` is signed in as, and
+/// `agy` holds exactly one at a time. Two Burnrate accounts would otherwise
+/// both render the signed-in account's numbers, so a card silently showed a
+/// different account's quota. Fail loudly instead.
+///
+/// The check is skipped when either side is unknown: a first fetch has no
+/// stored email yet (`app_state` persists it from this snapshot), and a
+/// `GetUserStatus` failure must keep degrading to quota-only rather than
+/// turning a transient error into a hard one.
+fn ensure_account_matches(account: &AccountConfig, reported: Option<&str>) -> Result<()> {
+    let (Some(stored), Some(reported)) = (account.email.as_deref(), reported) else {
+        return Ok(());
+    };
+    if stored.trim().eq_ignore_ascii_case(reported.trim()) {
+        return Ok(());
+    }
+    Err(anyhow!(
+        "The Antigravity CLI is signed in as {reported}, not {stored}. Antigravity reports quota only for the signed-in account, so switch accounts with `agy` in a terminal, or remove this one."
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -743,6 +766,40 @@ mod tests {
         assert_eq!(plan_from_label("Google AI Pro"), SubscriptionPlan::Pro);
         assert_eq!(plan_from_label("Free"), SubscriptionPlan::Free);
         assert_eq!(plan_from_label("Something else"), SubscriptionPlan::Unknown);
+    }
+
+    #[test]
+    fn rejects_a_snapshot_belonging_to_a_different_signed_in_account() {
+        let mut account = account();
+        account.email = Some("first@example.com".to_string());
+
+        let error = ensure_account_matches(&account, Some("second@example.com"))
+            .unwrap_err()
+            .to_string();
+
+        // Both sides are named so the message is actionable.
+        assert!(error.contains("second@example.com"), "{error}");
+        assert!(error.contains("first@example.com"), "{error}");
+        assert!(error.contains("agy"), "{error}");
+    }
+
+    #[test]
+    fn account_match_ignores_case_and_surrounding_whitespace() {
+        let mut account = account();
+        account.email = Some("  User@Example.com ".to_string());
+
+        assert!(ensure_account_matches(&account, Some("user@example.com")).is_ok());
+    }
+
+    #[test]
+    fn account_match_is_skipped_while_either_side_is_unknown() {
+        // First fetch: `app_state` has not persisted an email yet.
+        assert!(ensure_account_matches(&account(), Some("user@example.com")).is_ok());
+
+        // `GetUserStatus` failed, so quota-only degradation must still apply.
+        let mut known = account();
+        known.email = Some("user@example.com".to_string());
+        assert!(ensure_account_matches(&known, None).is_ok());
     }
 
     #[test]
