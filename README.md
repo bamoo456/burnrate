@@ -1,17 +1,17 @@
 # Burnrate
 
-[![CI](https://github.com/jamesbrink/burnrate/actions/workflows/ci.yml/badge.svg)](https://github.com/jamesbrink/burnrate/actions/workflows/ci.yml)
-[![Release](https://github.com/jamesbrink/burnrate/actions/workflows/release.yml/badge.svg)](https://github.com/jamesbrink/burnrate/actions/workflows/release.yml)
-[![Docs](https://github.com/jamesbrink/burnrate/actions/workflows/docs.yml/badge.svg)](https://jamesbrink.online/burnrate/)
-[![crates.io](https://img.shields.io/crates/v/burnrate.svg)](https://crates.io/crates/burnrate)
-[![downloads](https://img.shields.io/crates/d/burnrate.svg)](https://crates.io/crates/burnrate)
-[![latest release](https://img.shields.io/github/v/release/jamesbrink/burnrate?sort=semver)](https://github.com/jamesbrink/burnrate/releases/latest)
+[![CI](https://github.com/bamoo456/burnrate/actions/workflows/ci.yml/badge.svg)](https://github.com/bamoo456/burnrate/actions/workflows/ci.yml)
+[![Release](https://github.com/bamoo456/burnrate/actions/workflows/release.yml/badge.svg)](https://github.com/bamoo456/burnrate/actions/workflows/release.yml)
+[![Docs](https://github.com/bamoo456/burnrate/actions/workflows/docs.yml/badge.svg)](https://bamoo456.github.io/burnrate/)
+[![latest release](https://img.shields.io/github/v/release/bamoo456/burnrate?sort=semver)](https://github.com/bamoo456/burnrate/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](https://github.com/jamesbrink/burnrate/releases/latest)
+[![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](https://github.com/bamoo456/burnrate/releases/latest)
 
-Desktop usage monitor for Claude Code, Codex, GitHub Copilot, OpenRouter, Runpod, and AWS quotas, credits, spend, and subscription limits — plus claudex-powered local usage insights (daily burn, projections, model and project breakdowns). Built with Tauri 2 (Rust + React/TypeScript) and lives in the system tray (the menu bar on macOS).
+Desktop usage monitor for Claude Code, Codex, GitHub Copilot, Antigravity, OpenCode Go, OpenRouter, Runpod, and AWS quotas, credits, spend, and subscription limits. Built with Tauri 2 (Rust + React/TypeScript) and lives in the system tray (the menu bar on macOS).
 
-**Documentation: [jamesbrink.online/burnrate](https://jamesbrink.online/burnrate/)**
+> **Fork notice.** This is a fork of [jamesbrink/burnrate](https://github.com/jamesbrink/burnrate) that adds the Antigravity provider and deliberately removes all local-filesystem session scanning: accounts are added explicitly instead of auto-detected, and claudex-backed local usage insights are disabled. See [Differences from upstream](#differences-from-upstream).
+
+**Documentation: [bamoo456.github.io/burnrate](https://bamoo456.github.io/burnrate/)**
 
 ## Screenshots
 
@@ -27,39 +27,58 @@ Desktop usage monitor for Claude Code, Codex, GitHub Copilot, OpenRouter, Runpod
 
 - Menu-bar tray summary with a left-click usage popover and right-click actions (Preferences, Refresh, Quit).
 - Native translucent (vibrancy) popover on macOS that follows the system light/dark appearance, sizes itself to its content, and dismisses when it loses focus.
-- Native Preferences window for account management and manual OpenRouter/Runpod/AWS setup.
-- Auto-detects Claude Code, Codex, and GitHub Copilot accounts from local config; OpenRouter and Runpod are added via API key, and AWS uses your existing AWS profile/default credential chain.
+- Native Preferences window for account management and provider setup.
+- **Accounts are added explicitly** — Burnrate never scans your filesystem to discover them. Claude Code and Codex sign in from the app via browser OAuth; OpenRouter, Runpod, and OpenCode Go take an API key; AWS uses your existing profile/default credential chain; Antigravity reads quota through the `agy` CLI you are already signed in to.
 - **Multiple Claude Code and Codex accounts**, each signed in from the app via browser OAuth and shown with its email address and usage.
 - **Drag to reorder** accounts — reorder the tray usage cards or the Preferences list; the order persists across both windows.
 - Claude Code subscription buckets (5-hour, weekly, model-specific) with stale-auth checks via `claude auth status`.
 - Codex Pro/Max plan and rate-limit buckets read from the Codex app server.
-- **GitHub Copilot premium requests** per month against your plan's allowance — counted locally from Copilot CLI sessions, or exactly via an optional GitHub token and the billing API.
-- **Local usage insights** powered by [claudex](https://github.com/utensils/claudex): per-provider daily cost sparklines, today/week/month-to-date spend, a month-end projection, model distribution, and top projects — computed entirely from local CLI session logs.
+- **GitHub Copilot premium requests** per month against your plan's allowance, read from the billing API. Requires a GitHub token (a classic PAT — the billing endpoints reject fine-grained tokens).
+- **Antigravity** weekly and five-hour quota for both model pools (Gemini, Claude + GPT), plus account email and plan, read from the `agy` CLI's local quota server.
+- **OpenCode Go** rolling, weekly, and monthly usage from your Zen API key.
 - Runpod prepaid balance, current spend, burn-rate runway, active resources, and recent Pods/Serverless/storage costs.
 - AWS Cost Explorer month-to-date USD spend with optional monthly budgets and configurable service/tag/cost-category buckets such as Bedrock, EC2 compute, and S3.
 - Secrets in the OS keyring by default, with an explicit plaintext fallback.
 - Hides from the Dock by default; appears only while Preferences is open.
 - **Automatic updates (macOS)** with selectable **Stable** and **Nightly** channels: a dismissible banner and tray "Check for Updates…" entry offer a signature-verified one-click "Install & Restart." Choose the channel under Preferences → Updates.
 
+## Differences from upstream
+
+This fork removes every local-filesystem session-scanning path from
+[jamesbrink/burnrate](https://github.com/jamesbrink/burnrate) and adds one provider.
+
+|                          | Upstream                                                         | This fork                                                                                             |
+| ------------------------ | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Account discovery        | Auto-detects Claude Code / Codex / Copilot from local config     | **Explicit only** — `detect_accounts()` returns nothing (`src/providers/mod.rs`)                      |
+| Local usage insights     | claudex-backed daily cost, projections, model/project breakdowns | **Disabled** — `local_session_scanning_disabled()` is always true (`src/insights.rs`)                 |
+| Copilot premium requests | Local estimate from CLI sessions, GitHub token optional          | **Token required** — the local estimate always errors (`src/insights.rs`, `src/providers/copilot.rs`) |
+| Antigravity              | —                                                                | **Added** — quota via the `agy` CLI's local server (`src/providers/antigravity.rs`)                   |
+| crates.io                | Publishes `burnrate`                                             | Not published; GitHub Releases only                                                                   |
+
+The upstream docs site still documents the upstream behavior, so prefer the
+[docs for this fork](https://bamoo456.github.io/burnrate/).
+
 ## Install
 
-Download the native bundle for your platform from [GitHub Releases](https://github.com/jamesbrink/burnrate/releases), or install the binary crate (it ships the prebuilt UI):
+Download the native bundle for your platform from [GitHub Releases](https://github.com/bamoo456/burnrate/releases).
+
+This fork is **not published to crates.io** — the `burnrate` crate name belongs to upstream — so `cargo install burnrate` gets you the upstream build, not this one. To build from source instead:
 
 ```sh
-cargo install burnrate
+git clone https://github.com/bamoo456/burnrate && cd burnrate
+npm install && ./scripts/package-dmg    # macOS .app + .dmg
 ```
 
-See the [installation guide](https://jamesbrink.online/burnrate/guide/installation) for Nix, update channels, and signed macOS builds. If `cargo install` fails with [`ld: library not found for -liconv`](https://jamesbrink.online/burnrate/guide/troubleshooting#cargo-install-fails-ld-library-not-found-for-liconv) or [`gcc: error: unrecognized command-line option '-mmacos-version-min=…'`](https://jamesbrink.online/burnrate/guide/troubleshooting#cargo-install-fails-unrecognized-command-line-option-gcc-as-cc), a non-Apple `cc` is first in `PATH` — each link jumps to its fix.
+See the [installation guide](https://bamoo456.github.io/burnrate/guide/installation) for Nix and signed macOS builds.
 
 ## Documentation
 
 Setup, provider specifics (including AWS permissions), configuration, and troubleshooting live on the docs site:
 
-- [Getting started](https://jamesbrink.online/burnrate/guide/getting-started) — accounts, browser sign-in, multi-account isolation
-- [Configuration](https://jamesbrink.online/burnrate/guide/configuration) — storage paths, secrets, environment variables
-- [Providers](https://jamesbrink.online/burnrate/providers/claude-code) — Claude Code, Codex, GitHub Copilot, OpenRouter, Runpod, AWS
-- [Local insights](https://jamesbrink.online/burnrate/guide/local-insights) — claudex-backed local usage analytics
-- [Troubleshooting](https://jamesbrink.online/burnrate/guide/troubleshooting) — keychain prompts, CLI discovery, stale auth
+- [Getting started](https://bamoo456.github.io/burnrate/guide/getting-started) — accounts, browser sign-in, multi-account isolation
+- [Configuration](https://bamoo456.github.io/burnrate/guide/configuration) — storage paths, secrets, environment variables
+- [Providers](https://bamoo456.github.io/burnrate/providers/claude-code) — Claude Code, Codex, GitHub Copilot, Antigravity, OpenCode Go, OpenRouter, Runpod, AWS
+- [Troubleshooting](https://bamoo456.github.io/burnrate/guide/troubleshooting) — keychain prompts, CLI discovery, stale auth
 
 ## Development
 
@@ -74,7 +93,7 @@ The docs site is a VitePress app in `website/` — `docs-dev` starts it with hot
 
 ## Releases
 
-- `release-plz` manages crate release PRs, version tags, and crates.io publishing.
+- `release-plz` manages release PRs, CHANGELOG, and version tags. crates.io publishing is **off** (`release-plz.toml` `publish = false`).
 - Tagging `v*` builds native Tauri bundles (macOS, Linux, Windows) and uploads them with checksums to the GitHub Release, then publishes a signed `latest.json` (the **Stable** auto-update manifest).
 - A `nightly` workflow runs after green `CI` on `main`, building a signed macOS pre-release and promoting it to the rolling `nightly` release/manifest (the **Nightly** channel).
 - Auto-update signing uses a Tauri minisign keypair: the public key lives in `tauri.conf.json`; the private key + passphrase are the `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repo secrets.

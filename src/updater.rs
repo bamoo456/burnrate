@@ -7,7 +7,7 @@
 //!
 //! Adapted from the implementation in the sibling `aethon` project, trimmed
 //! to the core check → download → install → restart flow (no boot-probation
-//! rollback) and rebased on Burnrate's `jamesbrink/burnrate` release URLs.
+//! rollback) and rebased on Burnrate's `bamoo456/burnrate` release URLs.
 
 use std::time::Duration;
 
@@ -17,12 +17,12 @@ use tauri_plugin_updater::UpdaterExt;
 use url::Url;
 
 const STABLE_URL: &str =
-    "https://github.com/jamesbrink/burnrate/releases/latest/download/latest.json";
+    "https://github.com/bamoo456/burnrate/releases/latest/download/latest.json";
 const NIGHTLY_URL: &str =
-    "https://github.com/jamesbrink/burnrate/releases/download/nightly/latest.json";
+    "https://github.com/bamoo456/burnrate/releases/download/nightly/latest.json";
 
 const GITHUB_RELEASES_API: &str =
-    "https://api.github.com/repos/jamesbrink/burnrate/releases?per_page=10";
+    "https://api.github.com/repos/bamoo456/burnrate/releases?per_page=10";
 const NIGHTLY_CANDIDATE_LIMIT: usize = 3;
 const USER_AGENT: &str = concat!("burnrate-updater/", env!("CARGO_PKG_VERSION"));
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(8);
@@ -120,7 +120,7 @@ fn nightly_candidate_urls_from_json(body: &str, limit: usize) -> Vec<Url> {
     let mut urls: Vec<Url> = Vec::new();
     for r in filtered {
         let raw = format!(
-            "https://github.com/jamesbrink/burnrate/releases/download/{}/latest.json",
+            "https://github.com/bamoo456/burnrate/releases/download/{}/latest.json",
             r.tag_name
         );
         if let Ok(url) = Url::parse(&raw)
@@ -449,7 +449,7 @@ mod tests {
 
     fn url(tag: &str) -> Url {
         Url::parse(&format!(
-            "https://github.com/jamesbrink/burnrate/releases/download/{tag}/latest.json"
+            "https://github.com/bamoo456/burnrate/releases/download/{tag}/latest.json"
         ))
         .unwrap()
     }
