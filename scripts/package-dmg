@@ -24,9 +24,20 @@ if [ "$os" != "Darwin" ]; then
   exit 1
 fi
 
+# The Tauri CLI comes either from the Nix devshell (cargo-tauri) or from
+# `npm install` (@tauri-apps/cli) -- the README build path uses the latter.
+if command -v cargo-tauri >/dev/null 2>&1; then
+  tauri="cargo tauri"
+elif [ -x node_modules/.bin/tauri ]; then
+  tauri="node_modules/.bin/tauri"
+else
+  echo "package-dmg: no Tauri CLI found; run 'npm install' (or enter 'nix develop')." >&2
+  exit 1
+fi
+
 if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
   echo "package-dmg: signing with APPLE_SIGNING_IDENTITY=\"$APPLE_SIGNING_IDENTITY\""
-  cargo tauri build --bundles dmg "$@"
+  $tauri build --bundles dmg "$@"
 else
   echo "package-dmg: building UNSIGNED (--no-sign)." >&2
   echo "  An unsigned app re-prompts for keychain access on every launch." >&2
@@ -37,7 +48,7 @@ else
     echo "  To make 'Always Allow' persist, re-run signed:" >&2
     echo "    APPLE_SIGNING_IDENTITY=\"$hint\" package-dmg" >&2
   fi
-  cargo tauri build --no-sign --bundles dmg "$@"
+  $tauri build --no-sign --bundles dmg "$@"
 fi
 
 dmg="$(find target -path '*/bundle/dmg/*.dmg' -type f 2>/dev/null | sort | tail -1)"
