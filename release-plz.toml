@@ -1,12 +1,15 @@
+# This fork does not publish to crates.io: the `burnrate` name belongs to
+# upstream. release-plz still manages version bumps, CHANGELOG, and tags, which
+# is what `release.yml` keys its native bundles off.
 [workspace]
-publish = true
+publish = false
 release = true
 allow_dirty = false
 
 [[package]]
 name = "burnrate"
 changelog_update = true
-publish = true
+publish = false
 semver_check = false
 # Tauri's build.rs (tauri-build) regenerates files under gen/ during the build,
 # which `cargo publish --verify` rejects ("source directory was modified by

@@ -11,12 +11,13 @@ weekly Sonnet), each with remaining percentage and reset time.
 - An active subscription — API-key (inference-only) auth has no
   subscription quota to report.
 
-Accounts are auto-detected from `~/.claude`. Burnrate validates auth with
+Accounts are added explicitly (this fork does not auto-detect them) — see
+[Multiple accounts](#multiple-accounts). Burnrate validates auth with
 `claude auth status`, which also yields the account email shown in the UI.
 
 ## Multiple accounts
 
-Additional accounts sign in from **Preferences → Add account → Sign in with
+Every account signs in from **Preferences → Add account → Sign in with
 browser**. Burnrate runs `claude auth login` in an isolated per-account
 config dir (`CLAUDE_CONFIG_DIR`), opens your browser, and asks you to paste
 the authentication code back into the login dialog. Your default terminal

@@ -279,7 +279,7 @@ burnrate`).
   lockfile — deliberately **not** part of the app's npm tree, so the flake's
   `npmDepsHash` is unaffected). `docs-dev` / `docs-build` devshell helpers run
   it; `.github/workflows/docs.yml` builds and deploys it to GitHub Pages
-  (<https://jamesbrink.online/burnrate/>, base `/burnrate/`) on pushes to
+  (<https://bamoo456.github.io/burnrate/>, base `/burnrate/`) on pushes to
   `main` that touch `website/**`. Theme: forced dark, flat ember palette from
   `icons/app-icon.svg`, customized in `website/.vitepress/theme/custom.css`.
   App screenshots live in `website/public/screenshots/` (the README embeds

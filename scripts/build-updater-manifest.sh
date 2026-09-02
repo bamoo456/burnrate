@@ -18,7 +18,7 @@ set -euo pipefail
 #   $1 - directory containing the macOS `*.app.tar.gz.sig` file
 #   $2 - version string (e.g. `0.1.2` or `0.2.0-dev.12.g1a2b3c4`)
 #   $3 - asset URL prefix (e.g.
-#        `https://github.com/jamesbrink/burnrate/releases/download/v0.1.2`)
+#        `https://github.com/bamoo456/burnrate/releases/download/v0.1.2`)
 
 usage() {
   echo "usage: $0 <sig-dir> <version> <url-prefix>" >&2
