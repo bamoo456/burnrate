@@ -1,3 +1,4 @@
+mod antigravity;
 mod aws;
 mod claude;
 mod codex;
@@ -99,6 +100,7 @@ impl ProviderClient {
                 }
             },
             ProviderKind::Copilot => copilot::fetch(&self.http, account).await,
+            ProviderKind::Antigravity => antigravity::fetch(account).await,
         };
 
         match result {
@@ -712,8 +714,9 @@ fn token_pointers(provider: ProviderKind) -> &'static [&'static str] {
             &["/api_key", "/apiKey", "/key"]
         }
         // AWS uses the SDK credential chain; Copilot's optional GitHub token
-        // lives in the key store, which `token_from_config` checks first.
-        ProviderKind::Aws | ProviderKind::Copilot => &[],
+        // lives in the key store, which `token_from_config` checks first;
+        // Antigravity's auth is owned entirely by the `agy` CLI.
+        ProviderKind::Aws | ProviderKind::Copilot | ProviderKind::Antigravity => &[],
     }
 }
 

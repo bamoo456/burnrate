@@ -42,13 +42,18 @@ import type {
   AccountView,
   DashboardState,
   LocalUsageReport,
+  ProviderKind,
   ProviderLocalUsage,
   SnapshotStatus,
   UsageBucketSnapshot,
   UsageSnapshot,
 } from "./types";
 
-const providerLabels = {
+/// Tray-specific short provider names: the popover is narrow, so these are
+/// deliberately shorter than `constants.ts` `providerLabels`. Typed as an
+/// exhaustive record so a new provider fails the build here instead of
+/// silently rendering `undefined`.
+const providerLabels: Record<ProviderKind, string> = {
   "claude-code": "Claude",
   codex: "Codex",
   aws: "AWS",
@@ -56,7 +61,8 @@ const providerLabels = {
   "opencode-go": "OpenCode Go",
   runpod: "Runpod",
   copilot: "Copilot",
-} as const;
+  antigravity: "Antigravity",
+};
 
 const statusLabels: Record<SnapshotStatus, string> = {
   healthy: "OK",

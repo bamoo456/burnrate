@@ -69,10 +69,12 @@ test("only treats OpenCode Go rolling as the five-hour alias", () => {
     status: "healthy" as const,
   };
 
-  expect(dashboardWindowBucket(snapshot("opencode-go", [rolling]), "5-hour")?.id).toBe(
-    "rolling",
-  );
-  expect(dashboardWindowBucket(snapshot("runpod", [rolling]), "5-hour")).toBeNull();
+  expect(
+    dashboardWindowBucket(snapshot("opencode-go", [rolling]), "5-hour")?.id,
+  ).toBe("rolling");
+  expect(
+    dashboardWindowBucket(snapshot("runpod", [rolling]), "5-hour"),
+  ).toBeNull();
 });
 
 test("next reset ignores expired windows", () => {
@@ -103,4 +105,42 @@ test("next reset ignores expired windows", () => {
   ]);
 
   expect(nextResetBucket(value)?.id).toBe("weekly");
+});
+
+test("Antigravity's Gemini pair wins the dashboard columns over Claude + GPT", () => {
+  const bucket = (
+    id: string,
+    label: string,
+    window: string,
+    remaining: number,
+  ) => ({
+    id,
+    label,
+    window,
+    used: 100 - remaining,
+    limit: 100,
+    remaining,
+    unit: "%",
+    resetAt: null,
+    status: "healthy" as const,
+  });
+
+  // All four buckets carry a real limit, so only the label match separates
+  // them — the Claude + GPT pair must not take a column from Gemini.
+  const value = snapshot("antigravity", [
+    bucket("3p-5h", "Claude + GPT 5-hour", "5-hour", 100),
+    bucket("3p-weekly", "Claude + GPT Weekly", "weekly", 100),
+    bucket("gemini-5h", "5-hour", "5-hour", 62),
+    bucket("gemini-weekly", "Weekly", "weekly", 59),
+  ]);
+
+  expect(dashboardWindowBucket(value, "5-hour")?.id).toBe("gemini-5h");
+  expect(dashboardWindowBucket(value, "weekly")?.id).toBe("gemini-weekly");
+  // Antigravity has no monthly window; the column must stay empty rather than
+  // borrowing a weekly bucket.
+  expect(dashboardWindowBucket(value, "monthly")).toBeNull();
+  expect(secondaryUsageBuckets(value).map((entry) => entry.id)).toEqual([
+    "3p-5h",
+    "3p-weekly",
+  ]);
 });

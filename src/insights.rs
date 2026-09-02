@@ -38,10 +38,13 @@ pub(crate) fn claudex_kinds(provider: ProviderKind) -> Option<Vec<Provider>> {
         // The Copilot CLI carries token/premium-request metrics; VS Code
         // Copilot Chat sessions are indexed too and contribute session counts.
         ProviderKind::Copilot => Some(vec![Provider::Copilot, Provider::CopilotVscode]),
+        // Antigravity's quota lives server-side and its CLI writes no
+        // claudex-indexable session logs.
         ProviderKind::OpenRouter
         | ProviderKind::OpenCodeGo
         | ProviderKind::Runpod
-        | ProviderKind::Aws => None,
+        | ProviderKind::Aws
+        | ProviderKind::Antigravity => None,
     }
 }
 
