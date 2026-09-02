@@ -196,6 +196,11 @@ burnrate`).
   service is ready; 35s deadline), reads, then tears it down — reusing an
   `agy` the user already runs and never killing that one. Ports come from
   `lsof` on the `agy` pid (it opens more than one; only one serves quota).
+  `agy` holds exactly one signed-in account, so `ensure_account_matches`
+  rejects a snapshot whose `GetUserStatus` email differs from the account's
+  stored one — otherwise a second Antigravity account would silently render
+  the signed-in account's quota. The check is skipped when either side is
+  unknown (first fetch, or a failed `GetUserStatus`).
   `remainingFraction` is modelled as a percentage (`limit: 100`, unit `%`) so
   the shared meters and Warning/Exhausted thresholds apply unchanged; the
   Gemini pair takes the bare `5-hour` / `Weekly` labels that win the dashboard

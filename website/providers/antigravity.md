@@ -44,8 +44,11 @@ output, and never signals an `agy` you started yourself.
 ## Caveats
 
 - **Single account.** Quota comes from whichever account `agy` is signed in as
-  (`~/.gemini/google_accounts.json` holds one active account), so adding two
-  Antigravity accounts would show the same numbers twice.
+  (`~/.gemini/google_accounts.json` holds one active account). Burnrate checks
+  the reported email against the account's own, so a second Antigravity
+  account shows an error naming both addresses rather than repeating the
+  signed-in account's numbers. To follow a different account, switch it in
+  `agy`.
 - A cold `agy` needs a few seconds of keyring authentication before its quota
   endpoints answer, so the first refresh after a reboot can be slower.
 - If `agy` is signed out, the account shows an error asking you to run `agy`
