@@ -97,6 +97,7 @@ export const emptyForm: AccountInput = {
   awsCategories: [],
   copilotPlan: null,
   copilotCustomLimit: null,
+  subscriptionCostUsd: null,
 };
 
 /** Display order for provider pickers (Add-account grid, first-run logos). */
@@ -131,6 +132,7 @@ export function formForProvider(provider: ProviderKind): AccountInput {
     awsCategories: provider === "aws" ? cloneDefaultAwsCategories() : [],
     copilotPlan: null,
     copilotCustomLimit: null,
+    subscriptionCostUsd: null,
   };
 }
 
@@ -161,5 +163,6 @@ export function formFromAccount(account: AccountView): AccountInput {
         : [],
     copilotPlan: account.copilotPlan ?? null,
     copilotCustomLimit: account.copilotCustomLimit ?? null,
+    subscriptionCostUsd: account.subscriptionCostUsd ?? null,
   };
 }

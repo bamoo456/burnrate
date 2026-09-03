@@ -440,6 +440,7 @@ export function App() {
           input.provider === "copilot" && input.copilotPlan === "custom"
             ? (input.copilotCustomLimit ?? null)
             : null,
+        subscriptionCostUsd: input.subscriptionCostUsd ?? null,
       });
       updateAccounts(accounts, settings, summary);
       const dashboard = await guardedFetch({ force: true });

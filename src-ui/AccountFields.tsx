@@ -88,6 +88,25 @@ export function AccountFields({
         </>
       )}
 
+      <label>
+        Monthly subscription cost (USD, optional)
+        <input
+          type="number"
+          min="0"
+          step="0.01"
+          value={form.subscriptionCostUsd ?? ""}
+          placeholder="What this subscription bills per month"
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              subscriptionCostUsd: event.target.value
+                ? Number(event.target.value)
+                : null,
+            }))
+          }
+        />
+      </label>
+
       <label className="toggle">
         <input
           type="checkbox"

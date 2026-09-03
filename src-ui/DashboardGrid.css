@@ -10,7 +10,7 @@
 
 .dashboard-table {
   width: 100%;
-  min-width: 920px;
+  min-width: 1060px;
   border-collapse: separate;
   border-spacing: 0;
   table-layout: fixed;
@@ -49,21 +49,39 @@
 }
 
 .dashboard-table th:nth-child(2) {
+  width: 90px;
+}
+
+.dashboard-table th:nth-child(3) {
   width: 120px;
 }
 
-.dashboard-table th:nth-child(3),
 .dashboard-table th:nth-child(4),
-.dashboard-table th:nth-child(5) {
+.dashboard-table th:nth-child(5),
+.dashboard-table th:nth-child(6) {
   width: 135px;
 }
 
-.dashboard-table th:nth-child(6) {
+.dashboard-table th:nth-child(7) {
   width: 115px;
 }
 
-.dashboard-table th:nth-child(7) {
+.dashboard-table th:nth-child(8) {
   width: 105px;
+}
+
+.dashboard-table tfoot td {
+  border-bottom: 0;
+  background: var(--surface);
+  color: var(--fg-soft);
+  font-size: 11px;
+}
+
+.dashboard-table tfoot td strong {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .dashboard-table tbody tr.warning td {

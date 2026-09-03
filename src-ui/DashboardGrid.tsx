@@ -9,15 +9,18 @@ import {
   formatAgo,
   formatBalance,
   formatDashboardMetric,
+  formatMonthlyCostUsd,
   formatReset,
   hasAwsCostData,
   nextResetBucket,
   secondaryUsageBuckets,
+  totalMonthlySubscriptionCost,
   type DashboardWindow,
 } from "./format";
 import { ProviderLogo } from "./ProviderLogo";
 import { providerLabels } from "./constants";
 import type {
+  AccountView,
   SnapshotStatus,
   UsageBucketSnapshot,
   UsageSnapshot,
@@ -38,13 +41,24 @@ const windows: Array<{ key: DashboardWindow; label: string }> = [
   { key: "monthly", label: "Monthly" },
 ];
 
-export function DashboardGrid({ snapshots }: { snapshots: UsageSnapshot[] }) {
+export function DashboardGrid({
+  snapshots,
+  accounts = [],
+}: {
+  snapshots: UsageSnapshot[];
+  accounts?: AccountView[];
+}) {
+  const costByAccount = new Map(
+    accounts.map((account) => [account.id, account.subscriptionCostUsd ?? null]),
+  );
+  const totalCost = totalMonthlySubscriptionCost(accounts);
   return (
     <div className="dashboard-table-wrap">
       <table className="dashboard-table" aria-label="Account usage dashboard">
         <thead>
           <tr>
             <th scope="col">Account</th>
+            <th scope="col">Cost</th>
             <th scope="col">Balance</th>
             {windows.map((window) => (
               <th scope="col" key={window.key}>
@@ -57,20 +71,44 @@ export function DashboardGrid({ snapshots }: { snapshots: UsageSnapshot[] }) {
         </thead>
         <tbody>
           {snapshots.map((snapshot) => (
-            <DashboardRow key={snapshot.accountId} snapshot={snapshot} />
+            <DashboardRow
+              key={snapshot.accountId}
+              snapshot={snapshot}
+              cost={costByAccount.get(snapshot.accountId) ?? null}
+            />
           ))}
         </tbody>
+        {totalCost > 0 ? (
+          <tfoot>
+            <tr>
+              <td>Total subscriptions</td>
+              <td>
+                <strong>{formatMonthlyCostUsd(totalCost)}</strong>
+              </td>
+              <td colSpan={windows.length + 2} />
+            </tr>
+          </tfoot>
+        ) : null}
       </table>
     </div>
   );
 }
 
-function DashboardRow({ snapshot }: { snapshot: UsageSnapshot }) {
+function DashboardRow({
+  snapshot,
+  cost,
+}: {
+  snapshot: UsageSnapshot;
+  cost: number | null;
+}) {
   const resetBucket = nextResetBucket(snapshot);
   return (
     <tr className={snapshot.status}>
       <td className="dashboard-account-cell">
         <AccountIdentity snapshot={snapshot} />
+      </td>
+      <td>
+        <CostMetric cost={cost} />
       </td>
       <td>
         <BalanceMetric snapshot={snapshot} />
@@ -125,6 +163,16 @@ function AccountIdentity({ snapshot }: { snapshot: UsageSnapshot }) {
           <small className="dashboard-message">{snapshot.message}</small>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+function CostMetric({ cost }: { cost: number | null }) {
+  if (cost === null || cost <= 0) return <EmptyMetric />;
+  return (
+    <div className="dashboard-metric cost">
+      <strong>{formatMonthlyCostUsd(cost)}</strong>
+      <small>subscription</small>
     </div>
   );
 }

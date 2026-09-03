@@ -48,6 +48,9 @@ export interface AccountView {
   awsCategories?: AwsCategoryConfig[];
   copilotPlan?: CopilotPlan | null;
   copilotCustomLimit?: number | null;
+  /** Manually entered monthly subscription price (USD); null hides it from
+   *  cost totals. */
+  subscriptionCostUsd?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -66,6 +69,7 @@ export interface AccountInput {
   awsCategories?: AwsCategoryConfig[];
   copilotPlan?: CopilotPlan | null;
   copilotCustomLimit?: number | null;
+  subscriptionCostUsd?: number | null;
 }
 
 export type AwsCostFilter =
