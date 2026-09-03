@@ -174,6 +174,12 @@ pub(crate) struct AccountConfig {
     /// Monthly premium request allowance when `copilot_plan` is `Custom`.
     #[serde(default)]
     pub copilot_custom_limit: Option<f64>,
+    /// Monthly subscription price in USD the user pays for this account,
+    /// entered manually (providers expose no billing API through the
+    /// credentials Burnrate holds). `None` keeps the account out of cost
+    /// totals.
+    #[serde(default)]
+    pub subscription_cost_usd: Option<f64>,
     /// Global display order; lower sorts first. `None` is legacy/unset and sorts
     /// after explicitly ordered accounts.
     #[serde(default)]
@@ -211,6 +217,8 @@ pub(crate) struct AccountInput {
     pub copilot_plan: Option<CopilotPlan>,
     #[serde(default)]
     pub copilot_custom_limit: Option<f64>,
+    #[serde(default)]
+    pub subscription_cost_usd: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -241,6 +249,8 @@ pub(crate) struct AccountView {
     pub copilot_plan: Option<CopilotPlan>,
     #[serde(default)]
     pub copilot_custom_limit: Option<f64>,
+    #[serde(default)]
+    pub subscription_cost_usd: Option<f64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

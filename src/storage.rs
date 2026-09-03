@@ -17,7 +17,7 @@ use crate::{
     models::{AccountConfig, AppSettings, AwsCategoryConfig, AwsCostFilter, AwsGroupBy},
 };
 
-const LATEST_SCHEMA_VERSION: i64 = 2;
+const LATEST_SCHEMA_VERSION: i64 = 3;
 
 pub(crate) struct ConfigStore {
     conn: Mutex<Connection>,
@@ -231,6 +231,17 @@ fn run_migrations(conn: &mut Connection) -> Result<()> {
         )?;
         tx.commit()?;
     }
+    if version < 3 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(
+            r#"
+            ALTER TABLE accounts ADD COLUMN subscription_cost_usd REAL;
+
+            PRAGMA user_version = 3;
+            "#,
+        )?;
+        tx.commit()?;
+    }
     Ok(())
 }
 
@@ -321,6 +332,7 @@ fn load_accounts(conn: &Connection) -> Result<Vec<AccountConfig>> {
             aws_monthly_budget_usd,
             copilot_plan,
             copilot_custom_limit,
+            subscription_cost_usd,
             order_index,
             created_at,
             updated_at
@@ -348,9 +360,10 @@ fn load_accounts(conn: &Connection) -> Result<Vec<AccountConfig>> {
                 aws_monthly_budget_usd: row.get(14)?,
                 copilot_plan: row.get(15)?,
                 copilot_custom_limit: row.get(16)?,
-                order_index: row.get(17)?,
-                created_at: row.get(18)?,
-                updated_at: row.get(19)?,
+                subscription_cost_usd: row.get(17)?,
+                order_index: row.get(18)?,
+                created_at: row.get(19)?,
+                updated_at: row.get(20)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -376,6 +389,7 @@ struct AccountRow {
     aws_monthly_budget_usd: Option<f64>,
     copilot_plan: Option<String>,
     copilot_custom_limit: Option<f64>,
+    subscription_cost_usd: Option<f64>,
     order_index: Option<i64>,
     created_at: String,
     updated_at: String,
@@ -403,6 +417,7 @@ impl AccountRow {
             aws_categories,
             copilot_plan: self.copilot_plan.as_deref().map(from_wire).transpose()?,
             copilot_custom_limit: self.copilot_custom_limit,
+            subscription_cost_usd: self.subscription_cost_usd,
             order_index: self.order_index,
             created_at: parse_timestamp(&self.created_at)?,
             updated_at: parse_timestamp(&self.updated_at)?,
@@ -485,11 +500,12 @@ fn save_config_tx(tx: &Transaction<'_>, config: &AppConfig) -> Result<()> {
                 aws_monthly_budget_usd,
                 copilot_plan,
                 copilot_custom_limit,
+                subscription_cost_usd,
                 order_index,
                 created_at,
                 updated_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
             "#,
             params![
                 account.id,
@@ -509,6 +525,7 @@ fn save_config_tx(tx: &Transaction<'_>, config: &AppConfig) -> Result<()> {
                 account.aws_monthly_budget_usd,
                 account.copilot_plan.as_ref().map(to_wire).transpose()?,
                 account.copilot_custom_limit,
+                account.subscription_cost_usd,
                 account.order_index,
                 format_timestamp(&account.created_at),
                 format_timestamp(&account.updated_at),
@@ -678,6 +695,7 @@ mod tests {
             }],
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
         config.accounts[0].email = Some("aws@example.test".to_string());
         config.accounts[0].order_index = Some(2);
@@ -730,6 +748,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: Some(CopilotPlan::Custom),
             copilot_custom_limit: Some(2500.0),
+            subscription_cost_usd: None,
         });
 
         store.save_config(&config).unwrap();
@@ -825,13 +844,140 @@ mod tests {
         assert_eq!(loaded.accounts[0].id, "claude-code-local");
         assert_eq!(loaded.accounts[0].copilot_plan, None);
         assert_eq!(loaded.accounts[0].copilot_custom_limit, None);
+        assert_eq!(loaded.accounts[0].subscription_cost_usd, None);
 
         drop(store);
         let conn = Connection::open(db_path).unwrap();
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 2);
+        assert_eq!(version, 3);
+    }
+
+    /// Build a database exactly as schema v2 wrote it (Copilot columns, no
+    /// `subscription_cost_usd`), with one account row carrying a plan.
+    fn create_v2_database(db_path: &Path) {
+        let conn = Connection::open(db_path).unwrap();
+        conn.execute_batch(
+            r#"
+            CREATE TABLE app_settings (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                hide_from_dock INTEGER NOT NULL CHECK (hide_from_dock IN (0, 1)),
+                update_channel TEXT NOT NULL,
+                tray_scale REAL NOT NULL,
+                local_insights INTEGER NOT NULL DEFAULT 1 CHECK (local_insights IN (0, 1))
+            );
+
+            CREATE TABLE accounts (
+                id TEXT PRIMARY KEY,
+                provider TEXT NOT NULL,
+                label TEXT NOT NULL,
+                enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                auto_detected INTEGER NOT NULL CHECK (auto_detected IN (0, 1)),
+                credential_path TEXT,
+                endpoint_override TEXT,
+                secret_storage TEXT NOT NULL,
+                keyring_account TEXT,
+                plaintext_secret TEXT,
+                email TEXT,
+                config_dir TEXT,
+                aws_profile TEXT,
+                aws_region TEXT,
+                aws_monthly_budget_usd REAL,
+                copilot_plan TEXT,
+                copilot_custom_limit REAL,
+                order_index INTEGER,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE aws_categories (
+                account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                position INTEGER NOT NULL,
+                id TEXT NOT NULL,
+                label TEXT NOT NULL,
+                enabled INTEGER NOT NULL CHECK (enabled IN (0, 1)),
+                filter_json TEXT NOT NULL,
+                group_by_json TEXT,
+                PRIMARY KEY (account_id, id)
+            );
+
+            INSERT INTO app_settings (id, hide_from_dock, update_channel, tray_scale, local_insights)
+            VALUES (1, 1, 'stable', 1.0, 1);
+
+            INSERT INTO accounts (
+                id, provider, label, enabled, auto_detected, secret_storage,
+                copilot_plan, copilot_custom_limit, created_at, updated_at
+            )
+            VALUES (
+                'codex-local', 'codex', 'Codex', 1, 1, 'keyring',
+                NULL, NULL, '2026-02-01T00:00:00Z', '2026-02-01T00:00:00Z'
+            );
+
+            PRAGMA user_version = 2;
+            "#,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn migrates_v2_database_adding_subscription_cost_column() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join(config::DATABASE_FILE);
+        create_v2_database(&db_path);
+
+        let store =
+            ConfigStore::open_at(db_path.clone(), dir.path().join(config::CONFIG_FILE)).unwrap();
+
+        let loaded = store.load_config().unwrap();
+        assert_eq!(loaded.accounts.len(), 1);
+        assert_eq!(loaded.accounts[0].copilot_plan, None);
+        assert_eq!(loaded.accounts[0].subscription_cost_usd, None);
+
+        drop(store);
+        let conn = Connection::open(db_path).unwrap();
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 3);
+    }
+
+    #[test]
+    fn subscription_cost_round_trips() {
+        let dir = tempdir().unwrap();
+        let store = ConfigStore::open_at(
+            dir.path().join(config::DATABASE_FILE),
+            dir.path().join(config::CONFIG_FILE),
+        )
+        .unwrap();
+        let mut config = AppConfig::default();
+        config.upsert_manual(AccountInput {
+            id: Some("claude-max".to_string()),
+            provider: ProviderKind::ClaudeCode,
+            label: "Claude Max 5x".to_string(),
+            enabled: true,
+            endpoint_override: None,
+            secret_storage: SecretStorageMode::Keyring,
+            secret: None,
+            aws_profile: None,
+            aws_region: None,
+            aws_monthly_budget_usd: None,
+            aws_categories: Vec::new(),
+            copilot_plan: None,
+            copilot_custom_limit: None,
+            subscription_cost_usd: Some(100.0),
+        });
+        store.save_config(&config).unwrap();
+
+        let loaded = store.load_config().unwrap();
+
+        assert_eq!(loaded.accounts[0].subscription_cost_usd, Some(100.0));
+
+        // Clearing the cost persists too.
+        config.accounts[0].subscription_cost_usd = None;
+        store.save_config(&config).unwrap();
+        let loaded = store.load_config().unwrap();
+        assert_eq!(loaded.accounts[0].subscription_cost_usd, None);
     }
 
     #[test]
@@ -854,6 +1000,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
         config::save_to_path(&json_path, &legacy).unwrap();
 
@@ -911,6 +1058,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
         config::save_to_path(&backup_path, &backup).unwrap();
 
@@ -985,6 +1133,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
         store.save_config(&first).unwrap();
 
