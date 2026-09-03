@@ -50,6 +50,7 @@ impl AppConfig {
                 aws_categories: account.aws_categories.clone(),
                 copilot_plan: account.copilot_plan,
                 copilot_custom_limit: account.copilot_custom_limit,
+                subscription_cost_usd: account.subscription_cost_usd,
                 created_at: account.created_at,
                 updated_at: account.updated_at,
             })
@@ -123,6 +124,7 @@ impl AppConfig {
             account.aws_categories = input.aws_categories;
             account.copilot_plan = input.copilot_plan;
             account.copilot_custom_limit = input.copilot_custom_limit;
+            account.subscription_cost_usd = input.subscription_cost_usd;
             // Keep `auto_detected`: editing metadata does not change where the
             // account's credentials live, and clearing it would make the re-auth
             // guard treat the genuine system-default account as unsafe to sign
@@ -150,6 +152,7 @@ impl AppConfig {
             aws_categories: input.aws_categories,
             copilot_plan: input.copilot_plan,
             copilot_custom_limit: input.copilot_custom_limit,
+            subscription_cost_usd: input.subscription_cost_usd,
             order_index: None,
             created_at: now,
             updated_at: now,
@@ -380,6 +383,7 @@ pub(crate) fn default_auto_account(
         aws_categories: Vec::new(),
         copilot_plan: None,
         copilot_custom_limit: None,
+        subscription_cost_usd: None,
         order_index: None,
         created_at: now,
         updated_at: now,
@@ -474,6 +478,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
 
         save_to_path(&path, &config).unwrap();
@@ -581,6 +586,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
         config.accounts[0].plaintext_secret = Some("sk-test".to_string());
 
@@ -611,6 +617,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
         config.accounts[0].keyring_account = Some("stale-keyring-entry".to_string());
 
@@ -650,6 +657,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
 
         config.upsert_manual(AccountInput {
@@ -666,6 +674,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
 
         assert_eq!(config.accounts.len(), 1);
@@ -698,6 +707,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
 
         // Editing metadata must not strip detection provenance: the re-auth
@@ -724,6 +734,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
 
         let removed = config.remove("openrouter-main").unwrap();
@@ -752,6 +763,54 @@ mod tests {
         assert_eq!(config.accounts[0].updated_at, updated_at);
     }
 
+    #[test]
+    fn subscription_cost_flows_through_upsert_and_views() {
+        let mut config = AppConfig::default();
+        config.upsert_manual(AccountInput {
+            id: Some("claude-max".to_string()),
+            provider: ProviderKind::ClaudeCode,
+            label: "Claude Max 5x".to_string(),
+            enabled: true,
+            endpoint_override: None,
+            secret_storage: SecretStorageMode::Keyring,
+            secret: None,
+            aws_profile: None,
+            aws_region: None,
+            aws_monthly_budget_usd: None,
+            aws_categories: Vec::new(),
+            copilot_plan: None,
+            copilot_custom_limit: None,
+            subscription_cost_usd: Some(100.0),
+        });
+
+        assert_eq!(config.accounts[0].subscription_cost_usd, Some(100.0));
+
+        // An edit without the cost clears it: the input is the full state.
+        config.upsert_manual(AccountInput {
+            id: Some("claude-max".to_string()),
+            provider: ProviderKind::ClaudeCode,
+            label: "Renamed".to_string(),
+            enabled: true,
+            endpoint_override: None,
+            secret_storage: SecretStorageMode::Keyring,
+            secret: None,
+            aws_profile: None,
+            aws_region: None,
+            aws_monthly_budget_usd: None,
+            aws_categories: Vec::new(),
+            copilot_plan: None,
+            copilot_custom_limit: None,
+            subscription_cost_usd: None,
+        });
+
+        let view = config
+            .views()
+            .into_iter()
+            .find(|view| view.id == "claude-max")
+            .unwrap();
+        assert_eq!(view.subscription_cost_usd, None);
+    }
+
     fn add_account(config: &mut AppConfig, id: &str, provider: ProviderKind) {
         config.upsert_manual(AccountInput {
             id: Some(id.to_string()),
@@ -767,6 +826,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: None,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
         });
     }
 

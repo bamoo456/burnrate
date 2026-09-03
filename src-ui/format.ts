@@ -1,4 +1,4 @@
-import type { UsageBucketSnapshot, UsageSnapshot } from "./types";
+import type { AccountView, UsageBucketSnapshot, UsageSnapshot } from "./types";
 
 export type DashboardWindow = "5-hour" | "weekly" | "monthly";
 
@@ -306,4 +306,26 @@ export function formatUsd(value: number): string {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   }).format(value)}`;
+}
+
+/** Manually entered monthly subscription price for the cost surfaces:
+ *  `$20/mo`, `$9.99/mo`. Whole dollars stay whole (`$100/mo`). */
+export function formatMonthlyCostUsd(cost: number): string {
+  const formatted = new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(cost);
+  return `$${formatted}/mo`;
+}
+
+/** Sum of every configured account's monthly subscription cost. Disabled
+ *  accounts are included on purpose — the subscription still bills while the
+ *  account is unmonitored. */
+export function totalMonthlySubscriptionCost(
+  accounts: AccountView[],
+): number {
+  return accounts.reduce(
+    (total, account) => total + (account.subscriptionCostUsd ?? 0),
+    0,
+  );
 }

@@ -31,8 +31,10 @@ import {
   formatAgo,
   formatBalance,
   formatLimit,
+  formatMonthlyCostUsd,
   formatReset,
   hasAwsCostData,
+  totalMonthlySubscriptionCost,
 } from "./format";
 import { LocalUsageSummary } from "./LocalUsageSummary";
 import { ProviderLogo } from "./ProviderLogo";
@@ -104,6 +106,9 @@ export function TrayPanel({
     snapshot,
   }));
   const disabledCount = accounts.filter((account) => !account.enabled).length;
+  // Disabled accounts are included on purpose: the subscription still bills
+  // while the account is unmonitored.
+  const totalCost = totalMonthlySubscriptionCost(accounts);
   const isDense = snapshots.length >= 8;
   const updatedAgo = formatAgo(newestFetchedAt(snapshots));
   // Re-render periodically so the relative "Updated …" label stays honest
@@ -247,12 +252,21 @@ export function TrayPanel({
           )}
         </section>
 
-        {disabledCount > 0 ? (
+        {totalCost > 0 || disabledCount > 0 ? (
           <div className="tray-footer">
             <span>
-              {disabledCount === 1
-                ? "1 account off"
-                : `${disabledCount} accounts off`}
+              {[
+                totalCost > 0
+                  ? `Subscriptions ${formatMonthlyCostUsd(totalCost)}`
+                  : "",
+                disabledCount === 1
+                  ? "1 account off"
+                  : disabledCount > 1
+                    ? `${disabledCount} accounts off`
+                    : "",
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
             <button type="button" onClick={onOpenPreferences}>
               Manage

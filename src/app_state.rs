@@ -465,6 +465,7 @@ impl AppState {
                 aws_categories: Vec::new(),
                 copilot_plan: None,
                 copilot_custom_limit: None,
+                subscription_cost_usd: None,
                 order_index: None,
                 created_at: now,
                 updated_at: now,

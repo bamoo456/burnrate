@@ -1,7 +1,7 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, test } from "vitest";
 import { DashboardGrid } from "./DashboardGrid";
-import type { UsageSnapshot } from "./types";
+import type { AccountView, UsageSnapshot } from "./types";
 
 afterEach(() => cleanup());
 
@@ -17,6 +17,25 @@ function snapshot(
     quota: null,
     message: null,
     fetchedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+function account(
+  overrides: Partial<AccountView> & Pick<AccountView, "id" | "label">,
+): AccountView {
+  return {
+    provider: "claude-code",
+    enabled: true,
+    autoDetected: false,
+    credentialPath: null,
+    endpointOverride: null,
+    secretStorage: "keyring",
+    hasSecret: false,
+    email: null,
+    configDir: null,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
     ...overrides,
   };
 }
@@ -115,7 +134,7 @@ test("shows OpenRouter balance without inventing quota windows", () => {
 
   const row = screen.getByRole("row", { name: /OpenRouter Team/ });
   expect(within(row).getByText("$17.75")).toBeInTheDocument();
-  expect(within(row).getAllByLabelText("Not available")).toHaveLength(4);
+  expect(within(row).getAllByLabelText("Not available")).toHaveLength(5);
 });
 
 test("maps AWS month-to-date into Monthly and keeps category details visible", () => {
@@ -173,4 +192,48 @@ test("maps AWS month-to-date into Monthly and keeps category details visible", (
   expect(within(row).getByText("EC2 compute")).toBeInTheDocument();
   expect(within(row).getByText("$72.10 used")).toBeInTheDocument();
   expect(within(row).getByText("Warning")).toBeInTheDocument();
+});
+
+test("shows per-account subscription cost and a total that includes disabled accounts", () => {
+  render(
+    <DashboardGrid
+      snapshots={[
+        snapshot({ provider: "claude-code", label: "Claude Max" }),
+        snapshot({ provider: "codex", label: "Codex Pro" }),
+      ]}
+      accounts={[
+        account({ id: "claude-code-Claude Max", label: "Claude Max", subscriptionCostUsd: 100 }),
+        account({
+          id: "codex-Codex Pro",
+          label: "Codex Pro",
+          enabled: false,
+          subscriptionCostUsd: 19.99,
+        }),
+      ]}
+    />,
+  );
+
+  const claudeRow = screen.getByRole("row", { name: /Claude Max/ });
+  expect(within(claudeRow).getByText("$100/mo")).toBeInTheDocument();
+  expect(within(claudeRow).getByText("subscription")).toBeInTheDocument();
+  const codexRow = screen.getByRole("row", { name: /Codex Pro/ });
+  expect(within(codexRow).getByText("$19.99/mo")).toBeInTheDocument();
+
+  expect(screen.getByRole("columnheader", { name: "Cost" })).toBeInTheDocument();
+  const total = screen.getByRole("row", { name: /Total subscriptions/ });
+  // 100 + 19.99 — the disabled Codex account still bills, so it counts.
+  expect(within(total).getByText("$119.99/mo")).toBeInTheDocument();
+});
+
+test("omits the cost column values and total when no account has a cost", () => {
+  render(
+    <DashboardGrid
+      snapshots={[snapshot({ provider: "openrouter", label: "OpenRouter" })]}
+      accounts={[account({ id: "openrouter-OpenRouter", label: "OpenRouter" })]}
+    />,
+  );
+
+  expect(screen.getByRole("columnheader", { name: "Cost" })).toBeInTheDocument();
+  expect(screen.getByRole("row", { name: /OpenRouter/ }).textContent).not.toContain("/mo");
+  expect(screen.queryByRole("row", { name: /Total subscriptions/ })).not.toBeInTheDocument();
 });

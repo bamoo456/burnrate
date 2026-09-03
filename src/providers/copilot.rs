@@ -299,6 +299,7 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: plan,
             copilot_custom_limit: None,
+            subscription_cost_usd: None,
             order_index: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),

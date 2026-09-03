@@ -9,7 +9,11 @@ import {
 import { type ReactNode, useState } from "react";
 import { AccountModal, type AccountModalMode } from "./AccountModal";
 import { DashboardGrid } from "./DashboardGrid";
-import { formatAgo } from "./format";
+import {
+  formatAgo,
+  formatMonthlyCostUsd,
+  totalMonthlySubscriptionCost,
+} from "./format";
 import { ProviderLogo } from "./ProviderLogo";
 import { SortableList } from "./SortableList";
 import { UpdateBanner } from "./UpdateBanner";
@@ -210,7 +214,7 @@ export function Preferences({
                 }
               />
               {snapshots.length > 0 ? (
-                <DashboardGrid snapshots={snapshots} />
+                <DashboardGrid snapshots={snapshots} accounts={accounts} />
               ) : !busy ? (
                 <div className="empty-state">
                   Add an account to start monitoring quota.
@@ -271,6 +275,9 @@ function DashboardOverview({
   const staleCount = snapshots.filter(
     (snapshot) => snapshot.status === "stale",
   ).length;
+  // Disabled accounts are included on purpose: the subscription still bills
+  // while the account is unmonitored.
+  const totalCost = totalMonthlySubscriptionCost(accounts);
 
   return (
     <section className="prefs-usage" aria-label="Dashboard overview">
@@ -290,6 +297,9 @@ function DashboardOverview({
                   {healthyCount} healthy · {summary.warningCount} warning ·{" "}
                   {summary.criticalCount} critical
                   {staleCount > 0 ? ` · ${staleCount} stale` : ""}
+                  {totalCost > 0
+                    ? ` · ${formatMonthlyCostUsd(totalCost)} subscriptions`
+                    : ""}
                 </small>
               </span>
             </div>
