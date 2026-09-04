@@ -1,5 +1,5 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { DashboardGrid } from "./DashboardGrid";
 import type { AccountView, UsageSnapshot } from "./types";
 
@@ -236,4 +236,41 @@ test("omits the cost column values and total when no account has a cost", () => 
   expect(screen.getByRole("columnheader", { name: "Cost" })).toBeInTheDocument();
   expect(screen.getByRole("row", { name: /OpenRouter/ }).textContent).not.toContain("/mo");
   expect(screen.queryByRole("row", { name: /Total subscriptions/ })).not.toBeInTheDocument();
+});
+
+test("rolls a stored renewal anchor forward to the next billing date", () => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date(2026, 8, 4));
+  try {
+    render(
+      <DashboardGrid
+        snapshots={[
+          snapshot({ provider: "claude-code", label: "Claude Max" }),
+          snapshot({ provider: "codex", label: "Codex Pro" }),
+        ]}
+        accounts={[
+          account({
+            id: "claude-code-Claude Max",
+            label: "Claude Max",
+            // Months in the past: the anchor still resolves to this month.
+            subscriptionRenewsOn: "2025-03-23",
+          }),
+          account({ id: "codex-Codex Pro", label: "Codex Pro" }),
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("columnheader", { name: "Renews" }),
+    ).toBeInTheDocument();
+    const claudeRow = screen.getByRole("row", { name: /Claude Max/ });
+    expect(within(claudeRow).getByText("Sep 23 · in 19d")).toBeInTheDocument();
+    // No anchor stored: the cell stays blank rather than guessing a date.
+    const codexRow = screen.getByRole("row", { name: /Codex Pro/ });
+    expect(codexRow.querySelector(".dashboard-renews-cell")?.textContent).toBe(
+      "—",
+    );
+  } finally {
+    vi.useRealTimers();
+  }
 });

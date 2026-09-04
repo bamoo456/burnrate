@@ -98,6 +98,7 @@ export const emptyForm: AccountInput = {
   copilotPlan: null,
   copilotCustomLimit: null,
   subscriptionCostUsd: null,
+  subscriptionRenewsOn: null,
 };
 
 /** Display order for provider pickers (Add-account grid, first-run logos). */
@@ -133,6 +134,7 @@ export function formForProvider(provider: ProviderKind): AccountInput {
     copilotPlan: null,
     copilotCustomLimit: null,
     subscriptionCostUsd: null,
+    subscriptionRenewsOn: null,
   };
 }
 
@@ -164,5 +166,6 @@ export function formFromAccount(account: AccountView): AccountInput {
     copilotPlan: account.copilotPlan ?? null,
     copilotCustomLimit: account.copilotCustomLimit ?? null,
     subscriptionCostUsd: account.subscriptionCostUsd ?? null,
+    subscriptionRenewsOn: account.subscriptionRenewsOn ?? null,
   };
 }

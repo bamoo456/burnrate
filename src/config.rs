@@ -51,6 +51,7 @@ impl AppConfig {
                 copilot_plan: account.copilot_plan,
                 copilot_custom_limit: account.copilot_custom_limit,
                 subscription_cost_usd: account.subscription_cost_usd,
+                subscription_renews_on: account.subscription_renews_on.clone(),
                 created_at: account.created_at,
                 updated_at: account.updated_at,
             })
@@ -125,6 +126,7 @@ impl AppConfig {
             account.copilot_plan = input.copilot_plan;
             account.copilot_custom_limit = input.copilot_custom_limit;
             account.subscription_cost_usd = input.subscription_cost_usd;
+            account.subscription_renews_on = input.subscription_renews_on;
             // Keep `auto_detected`: editing metadata does not change where the
             // account's credentials live, and clearing it would make the re-auth
             // guard treat the genuine system-default account as unsafe to sign
@@ -153,6 +155,7 @@ impl AppConfig {
             copilot_plan: input.copilot_plan,
             copilot_custom_limit: input.copilot_custom_limit,
             subscription_cost_usd: input.subscription_cost_usd,
+            subscription_renews_on: input.subscription_renews_on,
             order_index: None,
             created_at: now,
             updated_at: now,
@@ -384,6 +387,7 @@ pub(crate) fn default_auto_account(
         copilot_plan: None,
         copilot_custom_limit: None,
         subscription_cost_usd: None,
+        subscription_renews_on: None,
         order_index: None,
         created_at: now,
         updated_at: now,
@@ -479,6 +483,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
 
         save_to_path(&path, &config).unwrap();
@@ -587,6 +592,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
         config.accounts[0].plaintext_secret = Some("sk-test".to_string());
 
@@ -618,6 +624,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
         config.accounts[0].keyring_account = Some("stale-keyring-entry".to_string());
 
@@ -658,6 +665,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
 
         config.upsert_manual(AccountInput {
@@ -675,6 +683,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
 
         assert_eq!(config.accounts.len(), 1);
@@ -708,6 +717,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
 
         // Editing metadata must not strip detection provenance: the re-auth
@@ -735,6 +745,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
 
         let removed = config.remove("openrouter-main").unwrap();
@@ -781,9 +792,14 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: Some(100.0),
+            subscription_renews_on: Some("2026-01-31".to_string()),
         });
 
         assert_eq!(config.accounts[0].subscription_cost_usd, Some(100.0));
+        assert_eq!(
+            config.accounts[0].subscription_renews_on.as_deref(),
+            Some("2026-01-31")
+        );
 
         // An edit without the cost clears it: the input is the full state.
         config.upsert_manual(AccountInput {
@@ -801,6 +817,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
 
         let view = config
@@ -809,6 +826,7 @@ mod tests {
             .find(|view| view.id == "claude-max")
             .unwrap();
         assert_eq!(view.subscription_cost_usd, None);
+        assert_eq!(view.subscription_renews_on, None);
     }
 
     fn add_account(config: &mut AppConfig, id: &str, provider: ProviderKind) {
@@ -827,6 +845,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
     }
 

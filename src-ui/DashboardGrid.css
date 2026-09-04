@@ -239,6 +239,10 @@
   background: var(--meter-crit);
 }
 
+.dashboard-renews-cell {
+  white-space: nowrap;
+}
+
 .dashboard-status-cell {
   vertical-align: middle !important;
 }

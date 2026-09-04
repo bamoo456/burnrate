@@ -329,3 +329,84 @@ export function totalMonthlySubscriptionCost(
     0,
   );
 }
+
+/** `YYYY-MM-DD` → local midnight. Deliberately not `new Date(value)`, which
+ *  reads a bare date as UTC and lands on the previous day west of Greenwich. */
+function parseLocalDate(value: string): Date | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!match) {
+    return null;
+  }
+  const [year, month, day] = match.slice(1).map(Number);
+  const date = new Date(year, month - 1, day);
+  // Round-trip catches out-of-range parts (month 13, Feb 30) that the Date
+  // constructor silently rolls over.
+  return date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+    ? date
+    : null;
+}
+
+/** The next time a monthly subscription bills, derived from the date the user
+ *  entered. Storing an anchor rather than "the next date" means it never goes
+ *  stale: the anchor is advanced a month at a time until it reaches today. A
+ *  day past the end of a short month clamps to that month's last day, and the
+ *  clamp is not sticky — a 31st anchor still bills on the 31st in March. */
+export function nextRenewalDate(
+  anchor: string | null | undefined,
+  today: Date = new Date(),
+): Date | null {
+  const start = anchor ? parseLocalDate(anchor) : null;
+  if (!start) {
+    return null;
+  }
+  const day = start.getDate();
+  const floor = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
+  let year = start.getFullYear();
+  let month = start.getMonth();
+  for (;;) {
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const candidate = new Date(year, month, Math.min(day, daysInMonth));
+    if (candidate >= floor) {
+      return candidate;
+    }
+    month += 1;
+    if (month > 11) {
+      month = 0;
+      year += 1;
+    }
+  }
+}
+
+/** Dashboard cell for the renewal date, e.g. `Sep 23 · in 19d`. */
+export function formatRenewal(
+  anchor: string | null | undefined,
+  today: Date = new Date(),
+): string {
+  const next = nextRenewalDate(anchor, today);
+  if (!next) {
+    return "—";
+  }
+  const label = next.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+  const floor = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+  );
+  const days = Math.round((next.getTime() - floor.getTime()) / 86_400_000);
+  if (days === 0) {
+    return `${label} · today`;
+  }
+  if (days === 1) {
+    return `${label} · tomorrow`;
+  }
+  return `${label} · in ${days}d`;
+}

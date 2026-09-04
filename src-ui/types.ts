@@ -51,6 +51,9 @@ export interface AccountView {
   /** Manually entered monthly subscription price (USD); null hides it from
    *  cost totals. */
   subscriptionCostUsd?: number | null;
+  /** `YYYY-MM-DD` anchor for the billing day. The next occurrence is derived
+   *  from it, so the stored value never needs updating. */
+  subscriptionRenewsOn?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -70,6 +73,7 @@ export interface AccountInput {
   copilotPlan?: CopilotPlan | null;
   copilotCustomLimit?: number | null;
   subscriptionCostUsd?: number | null;
+  subscriptionRenewsOn?: string | null;
 }
 
 export type AwsCostFilter =

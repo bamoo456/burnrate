@@ -191,6 +191,11 @@ pub(crate) struct AccountConfig {
     /// totals.
     #[serde(default)]
     pub subscription_cost_usd: Option<f64>,
+    /// The day this subscription bills, as a `YYYY-MM-DD` anchor the user
+    /// entered. Stored verbatim: the UI advances it a month at a time to
+    /// find the next occurrence, so the stored value never goes stale.
+    #[serde(default)]
+    pub subscription_renews_on: Option<String>,
     /// Global display order; lower sorts first. `None` is legacy/unset and sorts
     /// after explicitly ordered accounts.
     #[serde(default)]
@@ -230,6 +235,8 @@ pub(crate) struct AccountInput {
     pub copilot_custom_limit: Option<f64>,
     #[serde(default)]
     pub subscription_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub subscription_renews_on: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -262,6 +269,8 @@ pub(crate) struct AccountView {
     pub copilot_custom_limit: Option<f64>,
     #[serde(default)]
     pub subscription_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub subscription_renews_on: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
