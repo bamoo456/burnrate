@@ -43,33 +43,51 @@ struct ServerState {
 }
 
 /// Owns the running server task so a settings change can start/stop it without
-/// an app restart.
+/// an app restart. The token doubles as the identity of what is running.
 #[derive(Default)]
 pub(crate) struct RemoteServer {
-    task: Mutex<Option<JoinHandle<()>>>,
+    running: Mutex<Option<(String, JoinHandle<()>)>>,
 }
 
 impl RemoteServer {
-    /// Bring the server in line with `settings`, starting or stopping it as
-    /// needed. Restarts on a token change so a rotated token takes effect.
+    /// Bring the server in line with `settings`, starting, stopping, or leaving
+    /// it alone. Every settings save lands here — the tray-scale slider alone
+    /// fires one per step — and a needless restart would race the aborted task
+    /// for the port and leave remote access silently dead, so an unchanged
+    /// token is a no-op.
     pub(crate) fn apply(&self, app: &AppHandle, settings: &AppSettings) {
-        let mut task = self.task.lock().expect("remote server lock");
-        if let Some(handle) = task.take() {
-            handle.abort();
-        }
-        if !settings.remote_access || settings.remote_token.is_empty() {
+        let want = (settings.remote_access && !settings.remote_token.is_empty())
+            .then(|| settings.remote_token.clone());
+        let mut running = self.running.lock().expect("remote server lock");
+        if !needs_restart(
+            running.as_ref().map(|(token, _)| token.as_str()),
+            want.as_deref(),
+        ) {
             return;
         }
+        if let Some((_, handle)) = running.take() {
+            handle.abort();
+        }
+        let Some(token) = want else {
+            return;
+        };
         let state = ServerState {
             app: app.clone(),
-            token: settings.remote_token.clone(),
+            token: token.clone(),
         };
-        *task = Some(tauri::async_runtime::spawn(async move {
+        let handle = tauri::async_runtime::spawn(async move {
             if let Err(error) = serve(state).await {
                 eprintln!("Burnrate remote access stopped: {error}");
             }
-        }));
+        });
+        *running = Some((token, handle));
     }
+}
+
+/// Whether the running server (identified by its token, `None` when stopped)
+/// has to be torn down to reach the wanted state.
+fn needs_restart(running: Option<&str>, want: Option<&str>) -> bool {
+    running != want
 }
 
 async fn serve(state: ServerState) -> anyhow::Result<()> {
@@ -171,8 +189,8 @@ async fn asset(State(state): State<ServerState>, request: Request) -> Response {
             StatusCode::SERVICE_UNAVAILABLE,
             [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
             "Burnrate remote access needs a bundled build (the frontend assets \
-             are not embedded in `npm run dev`). Run a release build, or point \
-             this browser at the Vite dev server instead.",
+             are not embedded in `npm run dev`). Run a bundled build \
+             (`./scripts/build-app`) and try again.",
         )
             .into_response();
     };
@@ -228,6 +246,18 @@ pub(crate) fn share_url(token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn restarts_only_when_the_wanted_token_changes() {
+        assert!(!needs_restart(None, None), "still off");
+        assert!(
+            !needs_restart(Some("a"), Some("a")),
+            "unrelated settings save"
+        );
+        assert!(needs_restart(None, Some("a")), "turned on");
+        assert!(needs_restart(Some("a"), None), "turned off");
+        assert!(needs_restart(Some("a"), Some("b")), "token rotated");
+    }
 
     #[test]
     fn reads_the_token_cookie_among_others() {

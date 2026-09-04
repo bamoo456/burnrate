@@ -26,6 +26,7 @@ burnrate`).
   `submit_account_login_code`, `cancel_account_login`, `logout_account`, `save_settings`,
   `refresh_snapshots`, `local_usage`, `resize_preferences_to_content`,
   `resize_tray_to_content`, `close_preferences`, `open_preferences`,
+  `remote_share_url`,
   `updater_available`, `check_for_updates`, `install_pending_update`,
   `notify_update_available`),
   registers `tauri-plugin-updater` (and, macOS-only, `tauri-plugin-notification`

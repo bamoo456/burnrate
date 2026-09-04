@@ -74,12 +74,15 @@ export function App() {
   stateRef.current = state;
 
   const remoteAccess = state?.settings?.remoteAccess ?? false;
+  // The token arriving is the real trigger: `remoteAccess` flips on the
+  // optimistic save, before the backend has minted anything to link to.
+  const remoteToken = state?.settings?.remoteToken ?? "";
   useEffect(() => {
     if (isTrayView) {
       return;
     }
     void remoteShareUrl().then(setRemoteUrl);
-  }, [isTrayView, remoteAccess]);
+  }, [isTrayView, remoteAccess, remoteToken]);
 
   const login = useLogin({
     onCompleted: async () => {
