@@ -26,7 +26,7 @@ burnrate`).
   `submit_account_login_code`, `cancel_account_login`, `logout_account`, `save_settings`,
   `refresh_snapshots`, `local_usage`, `resize_preferences_to_content`,
   `resize_tray_to_content`, `close_preferences`, `open_preferences`,
-  `remote_share_url`,
+  `remote_share_url`, `open_remote_share_url`,
   `updater_available`, `check_for_updates`, `install_pending_update`,
   `notify_update_available`),
   registers `tauri-plugin-updater` (and, macOS-only, `tauri-plugin-notification`
@@ -272,7 +272,12 @@ burnrate`).
   because there is no event channel over HTTP. Every other wrapper already
   no-ops outside Tauri, so the write paths stay inert; `App.tsx` additionally
   passes `onOpenPreferences={null}` so `TrayPanel` hides its desktop-only
-  buttons. The share link pins `?view=tray`.
+  buttons. The share link pins `?view=tray`. In Preferences it renders as a
+  selectable link-styled **button** (not an `<a href>`: WKWebView's link-drag
+  breaks text selection and its "Open Link" context item would navigate the
+  window away, which a config-declared window cannot refuse) that calls
+  `open_remote_share_url` — the backend re-mints the URL from settings, so the
+  command can never become a generic opener for webview-supplied URLs.
 - `types.ts` mirrors the Rust wire models; `constants.ts` holds shared provider
   labels/endpoints (kept cycle-free). `Preferences.tsx`, `TrayPanel.tsx`,
   `ProviderLogo.tsx`, and `format.ts` are the focused UI pieces, plus

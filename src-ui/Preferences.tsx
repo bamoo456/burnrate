@@ -49,6 +49,7 @@ export interface RemoteAccessPanelProps {
   /** Link to open on the phone; `null` until the backend has minted a token. */
   shareUrl: string | null;
   onEnabledChange: (enabled: boolean) => void;
+  onOpenShareUrl: () => void;
 }
 
 const statusLabels: Record<SnapshotStatus, string> = {
@@ -235,11 +236,14 @@ export function Preferences({
           <SectionTitle title="Preferences" detail="Configuration" />
 
           <section className="prefs-insights" aria-label="Credential policy">
-            <SectionTitle title="Credential policy" detail="Account-managed only" />
+            <SectionTitle
+              title="Credential policy"
+              detail="Account-managed only"
+            />
             <p className="muted">
               Burnrate does not auto-detect system CLI accounts or scan local
-              Claude Code, Codex, or Copilot session history. Credentials must be
-              added explicitly and secrets are stored in the OS keyring.
+              Claude Code, Codex, or Copilot session history. Credentials must
+              be added explicitly and secrets are stored in the OS keyring.
             </p>
           </section>
 
@@ -382,7 +386,18 @@ function RemoteAccessSettings({
   enabled,
   shareUrl,
   onEnabledChange,
+  onOpenShareUrl,
 }: RemoteAccessPanelProps) {
+  const [copied, setCopied] = useState<"ok" | "failed" | null>(null);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(shareUrl ?? "");
+      setCopied("ok");
+    } catch {
+      setCopied("failed");
+    }
+    setTimeout(() => setCopied(null), 2000);
+  };
   return (
     <section className="prefs-remote" aria-label="Web access">
       <SectionTitle title="Web access" detail="Read-only" />
@@ -403,12 +418,19 @@ function RemoteAccessSettings({
       </label>
       {enabled && shareUrl ? (
         <p className="remote-share-url">
-          <code>{shareUrl}</code>
-          <button
-            type="button"
-            onClick={() => void navigator.clipboard?.writeText(shareUrl)}
-          >
-            Copy link
+          {/* Deliberately not an <a href>: WKWebView turns a drag on a link
+              into a link-drag (killing text selection) and its context-menu
+              "Open Link" would navigate this window away, which a
+              config-declared window cannot refuse. The backend opens it. */}
+          <button type="button" className="share-link" onClick={onOpenShareUrl}>
+            {shareUrl}
+          </button>
+          <button type="button" onClick={() => void copy()}>
+            {copied === "ok"
+              ? "Copied"
+              : copied === "failed"
+                ? "Copy failed"
+                : "Copy link"}
           </button>
         </p>
       ) : null}

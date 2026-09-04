@@ -1108,6 +1108,14 @@ export async function remoteShareUrl(): Promise<string | null> {
   return null;
 }
 
+/** Open the share link in the OS browser (backend re-mints the URL). */
+export async function openRemoteShareUrl(): Promise<void> {
+  /* v8 ignore next 3: native Tauri invoke path */
+  if (isTauri) {
+    await invoke("open_remote_share_url");
+  }
+}
+
 export async function updaterAvailable(): Promise<boolean> {
   /* v8 ignore next 3: native Tauri invoke path */
   if (isTauri) {
