@@ -230,17 +230,55 @@ fn strip_csp_meta(html: &str) -> String {
     out
 }
 
-/// Share link for the phone. `hostname` resolves over Bonjour on a LAN and over
-/// MagicDNS on Tailscale, so it beats a hardcoded IP that changes with DHCP.
+/// Share link for the phone. A bare `hostname` is a trap on a managed Mac: a
+/// corporate DNS search domain resolves it to whatever address it last
+/// registered (a VPN or hotspot lease), not the machine on this LAN. The
+/// Bonjour `.local` name is answered by the host itself over the interface the
+/// query arrived on, so it always names the right address without guessing
+/// which of the utun/Wi-Fi interfaces is the LAN one.
+///
+/// ponytail: mDNS is not resolvable from most Android browsers; those users
+/// need the LAN IP, which the UI does not offer yet.
 pub(crate) fn share_url(token: &str) -> String {
-    let host = std::process::Command::new("hostname")
+    share_url_for_host(&share_host(), token)
+}
+
+fn share_url_for_host(host: &str, token: &str) -> String {
+    format!("http://{host}:{REMOTE_PORT}/?view=tray&t={token}")
+}
+
+/// The Bonjour name of this machine, e.g. `george-c-m3p.local`.
+fn share_host() -> String {
+    // `scutil --get LocalHostName` is the actual Bonjour name, which differs
+    // from `hostname` whenever the Mac was renamed in Sharing preferences.
+    #[cfg(target_os = "macos")]
+    let command = {
+        let mut c = std::process::Command::new("scutil");
+        c.args(["--get", "LocalHostName"]);
+        c
+    };
+    #[cfg(not(target_os = "macos"))]
+    let command = std::process::Command::new("hostname");
+
+    let mut command = command;
+    let host = command
         .output()
         .ok()
         .and_then(|output| String::from_utf8(output.stdout).ok())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "localhost".to_string());
-    format!("http://{host}:{REMOTE_PORT}/?view=tray&t={token}")
+    mdns_host(&host)
+}
+
+/// Qualify a bare host label with `.local`; an already-qualified name (or
+/// `localhost`) is left alone.
+fn mdns_host(host: &str) -> String {
+    if host == "localhost" || host.contains('.') {
+        host.to_string()
+    } else {
+        format!("{host}.local")
+    }
 }
 
 #[cfg(test)]
@@ -340,5 +378,19 @@ mod tests {
         let url = share_url("tok");
         assert!(url.starts_with("http://"));
         assert!(url.ends_with(&format!(":{REMOTE_PORT}/?view=tray&t=tok")));
+    }
+
+    #[test]
+    fn share_url_uses_the_bonjour_name_so_corporate_dns_cannot_hijack_it() {
+        assert_eq!(mdns_host("george-c-m3p"), "george-c-m3p.local");
+        assert_eq!(
+            mdns_host("box.office.example.com"),
+            "box.office.example.com"
+        );
+        assert_eq!(mdns_host("localhost"), "localhost");
+        assert_eq!(
+            share_url_for_host("mac.local", "tok"),
+            format!("http://mac.local:{REMOTE_PORT}/?view=tray&t=tok")
+        );
     }
 }

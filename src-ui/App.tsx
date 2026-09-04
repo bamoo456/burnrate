@@ -352,7 +352,9 @@ export function App() {
   }, [isTrayView, accounts.length, snapshots, summary.label, busy, error]);
 
   useLayoutEffect(() => {
-    if (!isTrayView) {
+    // Remote mode has no native window to fit, and applying the desktop
+    // trayScale here would shrink the page in the viewer's browser.
+    if (!isTrayView || isRemote) {
       return;
     }
     const panel = document.querySelector<HTMLElement>(".tray-panel");

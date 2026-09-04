@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
+import { isRemote } from "./api";
 import { installContextMenuGuard } from "./nativeChrome";
 import "./styles.css";
 
@@ -17,6 +18,11 @@ if (new URLSearchParams(window.location.search).get("view") === "tray") {
 }
 if ("__TAURI_INTERNALS__" in window && navigator.userAgent.includes("Mac")) {
   root.dataset.vibrancy = "1";
+}
+// Served over LAN the same tray markup lands in a full browser window, where
+// popover geometry reads as tiny type in a very wide column.
+if (isRemote) {
+  root.dataset.remote = "1";
 }
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
