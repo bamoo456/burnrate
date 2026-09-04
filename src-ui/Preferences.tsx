@@ -61,7 +61,7 @@ const statusLabels: Record<SnapshotStatus, string> = {
   "not-configured": "No accounts",
 };
 
-type Summary = {
+export type Summary = {
   label: string;
   shortLabel: string;
   status: SnapshotStatus;
@@ -274,7 +274,7 @@ export function Preferences({
   );
 }
 
-function DashboardOverview({
+export function DashboardOverview({
   accounts,
   snapshots,
   summary,
@@ -496,7 +496,13 @@ function UpdatesSettings({
   );
 }
 
-function SectionTitle({ title, detail }: { title: string; detail: string }) {
+export function SectionTitle({
+  title,
+  detail,
+}: {
+  title: string;
+  detail: string;
+}) {
   return (
     <div className="section-heading">
       <h2>{title}</h2>

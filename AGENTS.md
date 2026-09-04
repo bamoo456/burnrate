@@ -274,11 +274,16 @@ burnrate`).
   Tauri IPC, and `onDashboardUpdated` / `onLocalUsageUpdated` poll on a 60s timer
   because there is no event channel over HTTP. Every other wrapper already
   no-ops outside Tauri, so the write paths stay inert; `App.tsx` additionally
-  passes `onOpenPreferences={null}` so `TrayPanel` hides its desktop-only
-  buttons, and the tray-window auto-resize effect is skipped (there is no
-  native window to fit, and the desktop `trayScale` would shrink the page in
-  the viewer's browser); `main.tsx` marks the root `data-remote="1"` so a wide
-  viewport gets a centred, zoomed column instead of full-bleed 11px type. The share link pins `?view=tray`. In Preferences it renders as a
+  renders `RemoteDashboard.tsx` instead of either desktop surface: the
+  read-only half of the Preferences page (header, `DashboardOverview`,
+  "Accounts at a glance") with no sidebar, settings or modals, since a remote
+  viewer may not write. It gets its own `.remote-shell` root rather than
+  `.prefs-shell`, which pins itself to `100vh` because the desktop window
+  resizes to fit — on a phone that would trap the table in an inner scroller.
+  The tray-window auto-resize effect is skipped for the same reason (no native
+  window to fit), and `main.tsx` withholds `data-view="tray"` so a `?view=tray`
+  bookmark predating this cannot drag popover styling in. The share link is
+  just `/?t=…`. In Preferences it renders as a
   selectable link-styled **button** (not an `<a href>`: WKWebView's link-drag
   breaks text selection and its "Open Link" context item would navigate the
   window away, which a config-declared window cannot refuse) that calls

@@ -26,6 +26,7 @@ import { useUpdater } from "./useUpdater";
 import { LoginModal } from "./LoginModal";
 import { UpdateDialog } from "./UpdateDialog";
 import { Preferences } from "./Preferences";
+import { RemoteDashboard } from "./RemoteDashboard";
 import { formFromAccount, providerLabels } from "./constants";
 import { TrayPanel } from "./TrayPanel";
 import type {
@@ -565,6 +566,18 @@ export function App() {
     }
   }
 
+  if (isRemote) {
+    return (
+      <RemoteDashboard
+        accounts={accounts}
+        snapshots={snapshots}
+        summary={summary}
+        busy={busy}
+        onRefresh={() => void revalidate({ force: true })}
+      />
+    );
+  }
+
   if (isTrayView) {
     return (
       <TrayPanel
@@ -575,7 +588,7 @@ export function App() {
         localUsage={null}
         updateAvailable={updater.state.available}
         onRefresh={() => void revalidate({ force: true })}
-        onOpenPreferences={isRemote ? null : () => void openPreferences()}
+        onOpenPreferences={() => void openPreferences()}
         onReorderAccounts={(ids) => void onReorderAccounts(ids)}
       />
     );

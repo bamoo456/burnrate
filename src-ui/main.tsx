@@ -13,17 +13,18 @@ installContextMenuGuard(document);
 // elsewhere — dev:web, Linux/Windows builds — the CSS keeps an opaque surface
 // and the transparent window flag is harmless.
 const root = document.documentElement;
-if (new URLSearchParams(window.location.search).get("view") === "tray") {
+// Remote pages render the read-only dashboard, so a `?view=tray` bookmark from
+// before that change must not drag the popover styling in with it.
+if (
+  !isRemote &&
+  new URLSearchParams(window.location.search).get("view") === "tray"
+) {
   root.dataset.view = "tray";
 }
 if ("__TAURI_INTERNALS__" in window && navigator.userAgent.includes("Mac")) {
   root.dataset.vibrancy = "1";
 }
-// Served over LAN the same tray markup lands in a full browser window, where
-// popover geometry reads as tiny type in a very wide column.
-if (isRemote) {
-  root.dataset.remote = "1";
-}
+
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
