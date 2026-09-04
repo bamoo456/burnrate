@@ -352,6 +352,8 @@ function dashboardState(): DashboardState {
       updateChannel: "stable",
       trayScale: 1,
       localInsights: true,
+      remoteAccess: false,
+      remoteToken: "",
     },
   };
 }

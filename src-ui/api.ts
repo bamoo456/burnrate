@@ -23,6 +23,35 @@ import type {
 } from "./types";
 
 const isTauri = "__TAURI_INTERNALS__" in window;
+/**
+ * True when this page was served by the Rust LAN server (`src/server.rs`
+ * injects the marker into `index.html`). There is no Tauri IPC in that browser,
+ * so reads go over `fetch` and desktop-only controls are hidden.
+ */
+export const isRemote = !isTauri && "__BURNRATE_REMOTE__" in window;
+/** No push channel over HTTP; poll instead of `listen()`. */
+const REMOTE_POLL_INTERVAL_MS = 60_000;
+
+async function fetchRemote<T>(path: string): Promise<T> {
+  const response = await fetch(path, { credentials: "same-origin" });
+  if (!response.ok) {
+    throw new Error(`${path} failed: ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
+/** Poll `path` on an interval, handing each payload to `handler`. */
+function pollRemote<T>(
+  path: string,
+  handler: (payload: T) => void | Promise<void>,
+): () => void {
+  const timer = setInterval(() => {
+    void fetchRemote<T>(path)
+      .then(handler)
+      .catch((error) => console.debug("Remote poll failed", error));
+  }, REMOTE_POLL_INTERVAL_MS);
+  return () => clearInterval(timer);
+}
 
 // Per-window dashboard cache + fetch guard. During `tauri dev`, HMR reloads
 // remount the app and would otherwise re-fetch on every save, and opening the
@@ -155,6 +184,8 @@ let mockSettings: AppSettings = {
   updateChannel: "stable",
   trayScale: 1,
   localInsights: true,
+  remoteAccess: false,
+  remoteToken: "",
 };
 
 const mockSnapshots: UsageSnapshot[] = [
@@ -582,6 +613,9 @@ export async function localUsage(): Promise<LocalUsageReport> {
   if (isTauri) {
     return invoke<LocalUsageReport>("local_usage");
   }
+  if (isRemote) {
+    return fetchRemote<LocalUsageReport>("/api/local-usage");
+  }
   return mockLocalUsageReport();
 }
 
@@ -589,6 +623,9 @@ export async function localUsage(): Promise<LocalUsageReport> {
 export async function onLocalUsageUpdated(
   handler: (report: LocalUsageReport) => void | Promise<void>,
 ) {
+  if (isRemote) {
+    return pollRemote<LocalUsageReport>("/api/local-usage", handler);
+  }
   return onLoginEvent<LocalUsageReport>(
     "burnrate-local-usage-updated",
     handler,
@@ -599,6 +636,9 @@ export async function loadDashboard(): Promise<DashboardState> {
   /* v8 ignore next 3: native Tauri invoke path */
   if (isTauri) {
     return invoke<DashboardState>("dashboard");
+  }
+  if (isRemote) {
+    return fetchRemote<DashboardState>("/api/dashboard");
   }
   return {
     accounts: mockAccounts,
@@ -763,6 +803,9 @@ export async function refreshDashboard(): Promise<DashboardState> {
   /* v8 ignore next 3: native Tauri invoke path */
   if (isTauri) {
     return invoke<DashboardState>("refresh_snapshots");
+  }
+  if (isRemote) {
+    return fetchRemote<DashboardState>("/api/dashboard");
   }
   const snapshots = mockSnapshots.map((snapshot) => ({
     ...snapshot,
@@ -1014,6 +1057,9 @@ export async function onDashboardUpdated(
       handler(event.payload),
     );
   }
+  if (isRemote) {
+    return pollRemote<DashboardState>("/api/dashboard", handler);
+  }
 
   return () => {};
 }
@@ -1051,6 +1097,15 @@ export async function getAppVersion(): Promise<string> {
     return getVersion();
   }
   return "dev";
+}
+
+/** Share link for a phone, or `null` while LAN web access is off. */
+export async function remoteShareUrl(): Promise<string | null> {
+  /* v8 ignore next 3: native Tauri invoke path */
+  if (isTauri) {
+    return invoke<string | null>("remote_share_url");
+  }
+  return null;
 }
 
 export async function updaterAvailable(): Promise<boolean> {

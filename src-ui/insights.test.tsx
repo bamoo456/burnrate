@@ -231,6 +231,8 @@ test("TrayPanel renders local usage once per provider with a shared-history capt
       updateChannel: "stable",
       trayScale: 1,
       localInsights: true,
+      remoteAccess: false,
+      remoteToken: "",
     },
   };
 
@@ -372,6 +374,8 @@ function trayPanel(
       updateChannel: "stable",
       trayScale: 1,
       localInsights: true,
+      remoteAccess: false,
+      remoteToken: "",
     },
   };
   return (
@@ -507,6 +511,8 @@ test("tray footer counts disabled accounts and opens preferences", async () => {
       updateChannel: "stable",
       trayScale: 1,
       localInsights: true,
+      remoteAccess: false,
+      remoteToken: "",
     },
   };
 

@@ -11,7 +11,9 @@ import {
   onRefreshRequested,
   onSettingsUpdated,
   openPreferences,
+  isRemote,
   readCachedDashboard,
+  remoteShareUrl,
   removeAccount,
   reorderAccounts,
   resizePreferencesToContent,
@@ -62,6 +64,7 @@ export function App() {
   // tray view passively mirrors the backend's update-available broadcast.
   const updater = useUpdater(updateChannel, { enabled: !isTrayView });
 
+  const [remoteUrl, setRemoteUrl] = useState<string | null>(null);
   useEffect(() => {
     void getAppVersion().then(setAppVersion);
   }, []);
@@ -69,6 +72,17 @@ export function App() {
   // show the cold-start spinner without going stale.
   const stateRef = useRef<DashboardState | null>(state);
   stateRef.current = state;
+
+  const remoteAccess = state?.settings?.remoteAccess ?? false;
+  // The token arriving is the real trigger: `remoteAccess` flips on the
+  // optimistic save, before the backend has minted anything to link to.
+  const remoteToken = state?.settings?.remoteToken ?? "";
+  useEffect(() => {
+    if (isTrayView) {
+      return;
+    }
+    void remoteShareUrl().then(setRemoteUrl);
+  }, [isTrayView, remoteAccess, remoteToken]);
 
   const login = useLogin({
     onCompleted: async () => {
@@ -167,6 +181,9 @@ export function App() {
     // This fork is account-managed-only. Keep the legacy field false so a save
     // also migrates older upstream settings away from local session scanning.
     localInsights: false,
+    remoteAccess: state?.settings?.remoteAccess ?? false,
+    // Backend-owned; round-tripped untouched so a save can't clear it.
+    remoteToken: state?.settings?.remoteToken ?? "",
   };
 
   async function updateSettings(next: AppSettings) {
@@ -194,6 +211,13 @@ export function App() {
     // settings-updated event reconcile both windows. Roll back if the save
     // fails so the UI doesn't drift from the stored config.
     await updateSettings({ ...previousSettings, updateChannel: channel });
+  }
+
+  async function onRemoteAccessChange(remoteAccess: boolean) {
+    if (remoteAccess === settings.remoteAccess) {
+      return;
+    }
+    await updateSettings({ ...settings, remoteAccess });
   }
 
   async function onTrayScaleChange(trayScale: number) {
@@ -547,7 +571,7 @@ export function App() {
         localUsage={null}
         updateAvailable={updater.state.available}
         onRefresh={() => void revalidate({ force: true })}
-        onOpenPreferences={() => void openPreferences()}
+        onOpenPreferences={isRemote ? null : () => void openPreferences()}
         onReorderAccounts={(ids) => void onReorderAccounts(ids)}
       />
     );
@@ -571,6 +595,11 @@ export function App() {
         settings={{
           trayScale: settings.trayScale,
           onTrayScaleChange: (scale) => void onTrayScaleChange(scale),
+        }}
+        remote={{
+          enabled: settings.remoteAccess,
+          shareUrl: remoteUrl,
+          onEnabledChange: (enabled) => void onRemoteAccessChange(enabled),
         }}
         updates={{
           channel: settings.updateChannel,

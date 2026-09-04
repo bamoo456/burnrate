@@ -120,6 +120,15 @@ pub(crate) struct AppSettings {
     /// `~/.claudex/index.db` from local CLI session logs.
     #[serde(default = "default_true")]
     pub local_insights: bool,
+    /// LAN web access: serve the read-only tray view + JSON over HTTP so a
+    /// phone on the same network (or Tailscale) can watch the dashboard.
+    #[serde(default)]
+    pub remote_access: bool,
+    /// Shared secret for `remote_access`, minted by the backend the first time
+    /// the toggle is turned on. The UI only ever displays it inside the share
+    /// URL; it is never edited from the frontend.
+    #[serde(default)]
+    pub remote_token: String,
 }
 
 impl Default for AppSettings {
@@ -129,6 +138,8 @@ impl Default for AppSettings {
             update_channel: UpdateChannel::default(),
             tray_scale: default_tray_scale(),
             local_insights: true,
+            remote_access: false,
+            remote_token: String::new(),
         }
     }
 }

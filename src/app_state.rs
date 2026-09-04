@@ -127,6 +127,9 @@ impl AppState {
 
     pub(crate) fn save_settings(&self, settings: AppSettings) -> Result<AppSettings> {
         self.update_config(|config| {
+            let mut settings = settings;
+            settings.remote_token =
+                resolve_remote_token(&config.settings.remote_token, settings.remote_access);
             config.settings = settings;
             Ok(config.settings.clone())
         })
@@ -857,10 +860,46 @@ fn cleanup_managed_dir(dir: Option<&str>) {
     }
 }
 
+/// The remote-access token is backend-owned: the UI round-trips whatever it was
+/// handed, so the stored token always wins, and a fresh one is minted only when
+/// the toggle first goes on. Turning access off keeps the token, so an existing
+/// share link survives a toggle.
+fn resolve_remote_token(stored: &str, remote_access: bool) -> String {
+    if remote_access && stored.is_empty() {
+        return uuid::Uuid::new_v4().simple().to_string();
+    }
+    stored.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::{TimeZone, Utc};
+
+    #[test]
+    fn mints_a_remote_token_once_and_then_keeps_it() {
+        let minted = resolve_remote_token("", true);
+        assert_eq!(minted.len(), 32, "uuid simple form");
+        assert_eq!(
+            resolve_remote_token(&minted, true),
+            minted,
+            "stable while on"
+        );
+        assert_eq!(
+            resolve_remote_token(&minted, false),
+            minted,
+            "survives a toggle off"
+        );
+        assert!(
+            resolve_remote_token("", false).is_empty(),
+            "never minted while off"
+        );
+        assert_ne!(
+            resolve_remote_token("", true),
+            minted,
+            "each mint is distinct"
+        );
+    }
 
     use crate::models::{QuotaSnapshot, SubscriptionPlan, SubscriptionSnapshot};
 

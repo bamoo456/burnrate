@@ -1003,6 +1003,41 @@ p {
   width: 100%;
 }
 
+.settings-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.settings-toggle > span {
+  display: grid;
+  gap: 3px;
+}
+
+.settings-toggle strong {
+  font-size: 13px;
+}
+
+.settings-toggle small {
+  color: var(--fg-soft);
+  line-height: 1.35;
+}
+
+.remote-share-url {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 0;
+}
+
+.remote-share-url code {
+  flex: 1;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
 .updates-body {
   display: grid;
   gap: 8px;

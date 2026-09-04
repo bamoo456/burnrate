@@ -17,7 +17,7 @@ use crate::{
     models::{AccountConfig, AppSettings, AwsCategoryConfig, AwsCostFilter, AwsGroupBy},
 };
 
-const LATEST_SCHEMA_VERSION: i64 = 3;
+const LATEST_SCHEMA_VERSION: i64 = 4;
 
 pub(crate) struct ConfigStore {
     conn: Mutex<Connection>,
@@ -242,6 +242,19 @@ fn run_migrations(conn: &mut Connection) -> Result<()> {
         )?;
         tx.commit()?;
     }
+    if version < 4 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(
+            r#"
+            ALTER TABLE app_settings ADD COLUMN remote_access INTEGER NOT NULL DEFAULT 0
+                CHECK (remote_access IN (0, 1));
+            ALTER TABLE app_settings ADD COLUMN remote_token TEXT NOT NULL DEFAULT '';
+
+            PRAGMA user_version = 4;
+            "#,
+        )?;
+        tx.commit()?;
+    }
     Ok(())
 }
 
@@ -286,7 +299,7 @@ fn load_config_from_conn(conn: &Connection) -> Result<AppConfig> {
 fn load_settings(conn: &Connection) -> Result<AppSettings> {
     let row = conn
         .query_row(
-            "SELECT hide_from_dock, update_channel, tray_scale, local_insights FROM app_settings WHERE id = 1",
+            "SELECT hide_from_dock, update_channel, tray_scale, local_insights, remote_access, remote_token FROM app_settings WHERE id = 1",
             [],
             |row| {
                 Ok((
@@ -294,12 +307,22 @@ fn load_settings(conn: &Connection) -> Result<AppSettings> {
                     row.get::<_, String>(1)?,
                     row.get::<_, f64>(2)?,
                     row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, String>(5)?,
                 ))
             },
         )
         .optional()?;
 
-    let Some((hide_from_dock, update_channel, tray_scale, local_insights)) = row else {
+    let Some((
+        hide_from_dock,
+        update_channel,
+        tray_scale,
+        local_insights,
+        remote_access,
+        remote_token,
+    )) = row
+    else {
         return Ok(AppSettings::default());
     };
 
@@ -308,6 +331,8 @@ fn load_settings(conn: &Connection) -> Result<AppSettings> {
         update_channel: from_wire(&update_channel)?,
         tray_scale,
         local_insights: int_to_bool(local_insights),
+        remote_access: int_to_bool(remote_access),
+        remote_token,
     })
 }
 
@@ -468,14 +493,16 @@ fn save_config_tx(tx: &Transaction<'_>, config: &AppConfig) -> Result<()> {
 
     tx.execute(
         r#"
-        INSERT INTO app_settings (id, hide_from_dock, update_channel, tray_scale, local_insights)
-        VALUES (1, ?1, ?2, ?3, ?4)
+        INSERT INTO app_settings (id, hide_from_dock, update_channel, tray_scale, local_insights, remote_access, remote_token)
+        VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6)
         "#,
         params![
             bool_to_int(config.settings.hide_from_dock),
             to_wire(&config.settings.update_channel)?,
             config.settings.tray_scale,
             bool_to_int(config.settings.local_insights),
+            bool_to_int(config.settings.remote_access),
+            config.settings.remote_token.as_str(),
         ],
     )?;
 
@@ -666,6 +693,7 @@ mod tests {
                 update_channel: UpdateChannel::Nightly,
                 tray_scale: 0.75,
                 local_insights: false,
+                ..AppSettings::default()
             },
             accounts: Vec::new(),
         };
@@ -840,6 +868,8 @@ mod tests {
         assert!(!loaded.settings.hide_from_dock);
         assert_eq!(loaded.settings.update_channel, UpdateChannel::Nightly);
         assert!(loaded.settings.local_insights, "new flag defaults on");
+        assert!(!loaded.settings.remote_access, "web access defaults off");
+        assert!(loaded.settings.remote_token.is_empty());
         assert_eq!(loaded.accounts.len(), 1);
         assert_eq!(loaded.accounts[0].id, "claude-code-local");
         assert_eq!(loaded.accounts[0].copilot_plan, None);
@@ -851,7 +881,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, LATEST_SCHEMA_VERSION);
     }
 
     /// Build a database exactly as schema v2 wrote it (Copilot columns, no
@@ -939,7 +969,7 @@ mod tests {
         let version: i64 = conn
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 3);
+        assert_eq!(version, LATEST_SCHEMA_VERSION);
     }
 
     #[test]
@@ -1143,6 +1173,7 @@ mod tests {
                 update_channel: UpdateChannel::Stable,
                 tray_scale: 1.0,
                 local_insights: true,
+                ..AppSettings::default()
             },
             accounts: Vec::new(),
         };
