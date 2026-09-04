@@ -127,6 +127,14 @@ impl AppState {
 
     pub(crate) fn save_settings(&self, settings: AppSettings) -> Result<AppSettings> {
         self.update_config(|config| {
+            // The remote-access token is backend-owned: the UI round-trips
+            // whatever it was handed, so keep the stored one and mint a fresh
+            // one the first time the toggle goes on.
+            let mut settings = settings;
+            settings.remote_token = config.settings.remote_token.clone();
+            if settings.remote_access && settings.remote_token.is_empty() {
+                settings.remote_token = uuid::Uuid::new_v4().simple().to_string();
+            }
             config.settings = settings;
             Ok(config.settings.clone())
         })

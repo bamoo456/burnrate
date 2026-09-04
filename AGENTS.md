@@ -122,6 +122,19 @@ burnrate`).
 - `models.rs` — every serde wire type shared with the UI. Structs are
   `camelCase`, enums `kebab-case`. This is the single source of truth that
   `src-ui/types.ts` mirrors by hand — keep them in sync.
+- `server.rs` — optional **LAN web access** (off by default). When
+  `AppSettings::remote_access` is on, an axum server binds `0.0.0.0:17877` and
+  serves two things: the embedded frontend (via Tauri's `asset_resolver`, so it
+  only works in a build with the `custom-protocol` feature — `npm run dev`
+  disables it and the server says so) and read-only JSON at `/api/dashboard` +
+  `/api/local-usage`. Every request is gated on a backend-minted token supplied
+  as `?t=` (the share link) or the cookie that a valid `?t=` sets, so a
+  home-screen bookmark keeps working. `index.html` is rewritten on the way out:
+  a `window.__BURNRATE_REMOTE__` marker (which `src-ui/api.ts` keys remote mode
+  off) is injected and any CSP `<meta>` stripped, since the desktop policy would
+  block the page's own `/api` calls. `RemoteServer::apply` is called at startup
+  and from `save_settings`, so toggling needs no restart. Read-only on purpose:
+  sign-in, account edits, and settings stay in the desktop app.
 - `providers/mod.rs` — `ProviderClient` (HTTP client + 5-minute _success_ cache
   keyed by `provider:id:endpoint:updated_at`), provider dispatch, and the shared
   JSON helpers: pointer-based `number/text/bool_value/datetime` lookups, generic
@@ -251,6 +264,14 @@ burnrate`).
   updater calls are mocked too (a `VITE_MOCK_UPDATE` opt-in advertises a fake
   update for `dev:web`, and the mock `checkForUpdates` dispatches the
   availability broadcast like the backend).
+- **Remote mode.** `api.ts` exports `isRemote` (true only when the page carries
+  the marker `src/server.rs` injects). In that mode the three read paths
+  (`loadDashboard`, `refreshDashboard`, `localUsage`) go over `fetch` instead of
+  Tauri IPC, and `onDashboardUpdated` / `onLocalUsageUpdated` poll on a 60s timer
+  because there is no event channel over HTTP. Every other wrapper already
+  no-ops outside Tauri, so the write paths stay inert; `App.tsx` additionally
+  passes `onOpenPreferences={null}` so `TrayPanel` hides its desktop-only
+  buttons. The share link pins `?view=tray`.
 - `types.ts` mirrors the Rust wire models; `constants.ts` holds shared provider
   labels/endpoints (kept cycle-free). `Preferences.tsx`, `TrayPanel.tsx`,
   `ProviderLogo.tsx`, and `format.ts` are the focused UI pieces, plus

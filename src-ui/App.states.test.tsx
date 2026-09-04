@@ -32,6 +32,7 @@ const api = vi.hoisted(() => ({
   guardedFetch: vi.fn(),
   hideTray: vi.fn(),
   installUpdate: vi.fn(),
+  isRemote: false,
   isStale: vi.fn(),
   localUsage: vi.fn(),
   logoutAccount: vi.fn(),
@@ -50,6 +51,7 @@ const api = vi.hoisted(() => ({
   onUpdateProgress: vi.fn(),
   openPreferences: vi.fn(),
   readCachedDashboard: vi.fn(),
+  remoteShareUrl: vi.fn(),
   removeAccount: vi.fn(),
   reorderAccounts: vi.fn(),
   resizePreferencesToContent: vi.fn(),
@@ -82,6 +84,7 @@ beforeEach(() => {
   api.notifyUpdateAvailable.mockResolvedValue(undefined);
   api.getAppVersion.mockResolvedValue("1.2.3");
   api.openPreferences.mockResolvedValue(undefined);
+  api.remoteShareUrl.mockResolvedValue(null);
   api.reorderAccounts.mockResolvedValue([]);
   api.logoutAccount.mockResolvedValue([]);
   api.currentCursorPosition.mockResolvedValue(null);
@@ -108,6 +111,8 @@ beforeEach(() => {
     updateChannel: "stable",
     trayScale: 1,
     localInsights: false,
+    remoteAccess: false,
+    remoteToken: "",
   });
   api.localUsage.mockResolvedValue({
     available: false,
@@ -462,6 +467,8 @@ test("persists the chosen update channel", async () => {
     updateChannel: "nightly",
     trayScale: 1,
     localInsights: false,
+    remoteAccess: false,
+    remoteToken: "",
   });
 
   render(<App />);
@@ -485,6 +492,8 @@ test("persists the tray content scale preference", async () => {
     updateChannel: "stable",
     trayScale: 0.75,
     localInsights: false,
+    remoteAccess: false,
+    remoteToken: "",
   });
 
   render(<App />);
@@ -1389,6 +1398,8 @@ function dashboardState(
       updateChannel: "stable",
       trayScale: 1,
       localInsights: false,
+      remoteAccess: false,
+      remoteToken: "",
     },
   };
 }

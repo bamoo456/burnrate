@@ -148,6 +148,10 @@ export interface AppSettings {
   updateChannel: UpdateChannel;
   trayScale: number;
   localInsights: boolean;
+  /** Serve the read-only tray view over HTTP on the LAN (phone access). */
+  remoteAccess: boolean;
+  /** Backend-minted shared secret for `remoteAccess`; never edited by the UI. */
+  remoteToken: string;
 }
 
 /** claudex-backed local usage metrics, aggregated per provider (not per

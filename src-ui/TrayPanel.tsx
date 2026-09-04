@@ -93,7 +93,8 @@ export function TrayPanel({
   localUsage?: LocalUsageReport | null;
   updateAvailable?: boolean;
   onRefresh: () => void;
-  onOpenPreferences: () => void;
+  /** `null` when served over the LAN: there is no desktop window to open. */
+  onOpenPreferences: (() => void) | null;
   onReorderAccounts: (orderedIds: string[]) => void;
 }) {
   const accounts = state?.accounts ?? [];
@@ -179,7 +180,7 @@ export function TrayPanel({
           ) : null}
         </div>
         <div className="tray-header-actions">
-          {updateAvailable ? (
+          {updateAvailable && onOpenPreferences ? (
             <button
               className="tray-update-pill"
               onClick={onOpenPreferences}
@@ -197,13 +198,15 @@ export function TrayPanel({
           >
             <RefreshCw size={16} className={busy ? "spin" : ""} />
           </button>
-          <button
-            className="icon-button tray-settings"
-            onClick={onOpenPreferences}
-            title="Settings"
-          >
-            <Settings size={16} />
-          </button>
+          {onOpenPreferences ? (
+            <button
+              className="icon-button tray-settings"
+              onClick={onOpenPreferences}
+              title="Settings"
+            >
+              <Settings size={16} />
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -245,9 +248,11 @@ export function TrayPanel({
           ) : (
             <div className="tray-empty">
               <span>No enabled accounts.</span>
-              <button type="button" onClick={onOpenPreferences}>
-                Open Preferences
-              </button>
+              {onOpenPreferences ? (
+                <button type="button" onClick={onOpenPreferences}>
+                  Open Preferences
+                </button>
+              ) : null}
             </div>
           )}
         </section>
@@ -268,9 +273,11 @@ export function TrayPanel({
                 .filter(Boolean)
                 .join(" · ")}
             </span>
-            <button type="button" onClick={onOpenPreferences}>
-              Manage
-            </button>
+            {onOpenPreferences ? (
+              <button type="button" onClick={onOpenPreferences}>
+                Manage
+              </button>
+            ) : null}
           </div>
         ) : null}
       </div>

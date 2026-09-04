@@ -39,6 +39,7 @@ custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]
 anyhow = "1"
+axum = "0.8"
 aws-config = "=1.5.18"
 aws-sdk-costexplorer = { version = "=1.100.0", default-features = false, features = [
   "rt-tokio",
@@ -78,6 +79,7 @@ thiserror = "2"
 tokio = { version = "1", features = [
   "io-util",
   "macros",
+  "net",
   "process",
   "rt-multi-thread",
   "time",

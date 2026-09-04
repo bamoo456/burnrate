@@ -9,6 +9,7 @@ mod key_store;
 mod linux_desktop;
 mod models;
 mod providers;
+mod server;
 mod storage;
 mod tray;
 mod updater;
@@ -63,13 +64,23 @@ fn save_account(
 fn save_settings(
     app: AppHandle,
     state: State<'_, AppState>,
+    remote: State<'_, server::RemoteServer>,
     settings: AppSettings,
 ) -> Result<AppSettings, String> {
     let settings = state
         .save_settings(settings)
         .map_err(|error| error.to_string())?;
+    remote.apply(&app, &settings);
     let _ = app.emit("burnrate-settings-updated", &settings);
     Ok(settings)
+}
+
+/// The link to hand a phone. `None` while LAN web access is off.
+#[tauri::command]
+fn remote_share_url(state: State<'_, AppState>) -> Option<String> {
+    let settings = state.settings();
+    (settings.remote_access && !settings.remote_token.is_empty())
+        .then(|| server::share_url(&settings.remote_token))
 }
 
 #[tauri::command]
@@ -522,6 +533,7 @@ fn main() {
         .manage(state)
         .manage(tray::TrayWindowState::default())
         .manage(updater::UpdaterState::default())
+        .manage(server::RemoteServer::default())
         .setup(move |app| {
             tray::apply_activation_policy(app.handle(), true);
             tray::set_dock_icon_if_unbundled();
@@ -547,6 +559,8 @@ fn main() {
                     }
                 });
             }
+            app.state::<server::RemoteServer>()
+                .apply(app.handle(), &app.state::<AppState>().settings());
             tray::install(app)?;
             tray::apply_tray_vibrancy(app.handle());
             spawn_background_refresh(app.handle().clone());
@@ -557,6 +571,7 @@ fn main() {
             list_accounts,
             save_account,
             save_settings,
+            remote_share_url,
             remove_account,
             detect_accounts,
             reorder_accounts,

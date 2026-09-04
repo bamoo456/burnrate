@@ -44,6 +44,13 @@ export interface TraySettingsPanelProps {
   onTrayScaleChange: (scale: number) => void;
 }
 
+export interface RemoteAccessPanelProps {
+  enabled: boolean;
+  /** Link to open on the phone; `null` until the backend has minted a token. */
+  shareUrl: string | null;
+  onEnabledChange: (enabled: boolean) => void;
+}
+
 const statusLabels: Record<SnapshotStatus, string> = {
   healthy: "Healthy",
   warning: "Warning",
@@ -76,6 +83,7 @@ export function Preferences({
   onLogout,
   onReorderAccounts,
   settings,
+  remote,
   updates,
 }: {
   accounts: AccountView[];
@@ -92,6 +100,7 @@ export function Preferences({
   onLogout: (id: string) => void;
   onReorderAccounts: (orderedIds: string[]) => void;
   settings: TraySettingsPanelProps;
+  remote: RemoteAccessPanelProps;
   updates: UpdatesPanelProps;
 }) {
   const [modal, setModal] = useState<
@@ -236,6 +245,8 @@ export function Preferences({
 
           <TraySettings {...settings} />
 
+          <RemoteAccessSettings {...remote} />
+
           <UpdatesSettings {...updates} />
         </section>
       </section>
@@ -363,6 +374,44 @@ function TraySettings({
           onChange={(event) => onTrayScaleChange(Number(event.target.value))}
         />
       </label>
+    </section>
+  );
+}
+
+function RemoteAccessSettings({
+  enabled,
+  shareUrl,
+  onEnabledChange,
+}: RemoteAccessPanelProps) {
+  return (
+    <section className="prefs-remote" aria-label="Web access">
+      <SectionTitle title="Web access" detail="Read-only" />
+      <label className="settings-toggle">
+        <input
+          type="checkbox"
+          checked={enabled}
+          onChange={(event) => onEnabledChange(event.target.checked)}
+        />
+        <span>
+          <strong>Serve the tray view on this network</strong>
+          <small>
+            Open the link below on a phone or another computer to watch quota.
+            The page is read-only; anyone with the link can see your usage and
+            account emails, so keep it to a trusted network or Tailscale.
+          </small>
+        </span>
+      </label>
+      {enabled && shareUrl ? (
+        <p className="remote-share-url">
+          <code>{shareUrl}</code>
+          <button
+            type="button"
+            onClick={() => void navigator.clipboard?.writeText(shareUrl)}
+          >
+            Copy link
+          </button>
+        </p>
+      ) : null}
     </section>
   );
 }
