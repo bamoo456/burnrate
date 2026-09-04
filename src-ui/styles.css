@@ -1292,6 +1292,31 @@ html[data-view="tray"][data-vibrancy="1"] .tray-panel {
   background: transparent;
 }
 
+/* LAN web access: the popover is sized for a ~360px window pinned to the menu
+   bar, so on a desktop browser it reads as a very wide column of 11px type.
+   Zoom (not `transform`) because it participates in layout, so the centred
+   column and the page's own scrollbar keep working. Phones already match the
+   popover width, so this only kicks in on a wide viewport. */
+@media (min-width: 700px) {
+  html[data-view="tray"][data-remote="1"] #root {
+    display: flex;
+    justify-content: center;
+  }
+
+  html[data-view="tray"][data-remote="1"] .tray-panel {
+    zoom: 1.25;
+    width: 100%;
+    max-width: 560px;
+    height: auto;
+    min-height: calc(100vh / 1.25);
+    overflow: visible;
+  }
+
+  html[data-view="tray"][data-remote="1"] .tray-scroll {
+    overflow: visible;
+  }
+}
+
 html[data-view="tray"] .tray-scroll {
   flex: 1 1 auto;
   min-height: 0;

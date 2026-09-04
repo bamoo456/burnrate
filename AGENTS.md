@@ -128,7 +128,10 @@ burnrate`).
   serves two things: the embedded frontend (via Tauri's `asset_resolver`, so it
   only works in a build with the `custom-protocol` feature — `npm run dev`
   disables it and the server says so) and read-only JSON at `/api/dashboard` +
-  `/api/local-usage`. Every request is gated on a backend-minted token supplied
+  `/api/local-usage`. The share link names the machine's Bonjour
+  `.local` host, not a bare `hostname` — on a managed Mac a corporate search
+  domain resolves the bare name to a stale VPN/hotspot lease. Every request is
+  gated on a backend-minted token supplied
   as `?t=` (the share link) or the cookie that a valid `?t=` sets, so a
   home-screen bookmark keeps working. `index.html` is rewritten on the way out:
   a `window.__BURNRATE_REMOTE__` marker (which `src-ui/api.ts` keys remote mode
@@ -272,7 +275,10 @@ burnrate`).
   because there is no event channel over HTTP. Every other wrapper already
   no-ops outside Tauri, so the write paths stay inert; `App.tsx` additionally
   passes `onOpenPreferences={null}` so `TrayPanel` hides its desktop-only
-  buttons. The share link pins `?view=tray`. In Preferences it renders as a
+  buttons, and the tray-window auto-resize effect is skipped (there is no
+  native window to fit, and the desktop `trayScale` would shrink the page in
+  the viewer's browser); `main.tsx` marks the root `data-remote="1"` so a wide
+  viewport gets a centred, zoomed column instead of full-bleed 11px type. The share link pins `?view=tray`. In Preferences it renders as a
   selectable link-styled **button** (not an `<a href>`: WKWebView's link-drag
   breaks text selection and its "Open Link" context item would navigate the
   window away, which a config-declared window cannot refuse) that calls
