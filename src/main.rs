@@ -83,6 +83,15 @@ fn remote_share_url(state: State<'_, AppState>) -> Option<String> {
         .then(|| server::share_url(&settings.remote_token))
 }
 
+/// Open the share link in the OS browser. The URL is re-minted here rather
+/// than accepted from the webview, so this can never become a generic opener.
+#[tauri::command]
+fn open_remote_share_url(state: State<'_, AppState>) {
+    if let Some(url) = remote_share_url(state) {
+        providers::login::open_external(&url);
+    }
+}
+
 #[tauri::command]
 async fn remove_account(
     state: State<'_, AppState>,
@@ -572,6 +581,7 @@ fn main() {
             save_account,
             save_settings,
             remote_share_url,
+            open_remote_share_url,
             remove_account,
             detect_accounts,
             reorder_accounts,

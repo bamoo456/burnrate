@@ -13,6 +13,7 @@ import {
   openPreferences,
   isRemote,
   readCachedDashboard,
+  openRemoteShareUrl,
   remoteShareUrl,
   removeAccount,
   reorderAccounts,
@@ -600,6 +601,7 @@ export function App() {
           enabled: settings.remoteAccess,
           shareUrl: remoteUrl,
           onEnabledChange: (enabled) => void onRemoteAccessChange(enabled),
+          onOpenShareUrl: () => void openRemoteShareUrl(),
         }}
         updates={{
           channel: settings.updateChannel,

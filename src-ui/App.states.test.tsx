@@ -52,6 +52,7 @@ const api = vi.hoisted(() => ({
   openPreferences: vi.fn(),
   readCachedDashboard: vi.fn(),
   remoteShareUrl: vi.fn(),
+  openRemoteShareUrl: vi.fn(),
   removeAccount: vi.fn(),
   reorderAccounts: vi.fn(),
   resizePreferencesToContent: vi.fn(),
@@ -404,7 +405,9 @@ test("a fresh install shows the guided account-managed first-run panel", async (
   ).toBeInTheDocument();
   fireEvent.click(screen.getByTitle("Close"));
 
-  expect(within(panel).queryByRole("button", { name: /Detect accounts/ })).not.toBeInTheDocument();
+  expect(
+    within(panel).queryByRole("button", { name: /Detect accounts/ }),
+  ).not.toBeInTheDocument();
   expect(api.detectAccounts).not.toHaveBeenCalled();
 });
 
@@ -480,7 +483,10 @@ test("persists the chosen update channel", async () => {
 
   await waitFor(() =>
     expect(api.saveSettings).toHaveBeenCalledWith(
-      expect.objectContaining({ updateChannel: "nightly", localInsights: false }),
+      expect.objectContaining({
+        updateChannel: "nightly",
+        localInsights: false,
+      }),
     ),
   );
 });
@@ -521,6 +527,38 @@ test("leaves native tray scale unchanged when the slider is already at 100%", as
   });
 
   expect(api.saveSettings).not.toHaveBeenCalled();
+});
+
+test("the share link opens through the backend and copies to the clipboard", async () => {
+  const url = "http://mac:17877/?view=tray&t=abc";
+  api.guardedFetch.mockResolvedValue(
+    dashboardState({
+      settings: {
+        hideFromDock: false,
+        updateChannel: "stable",
+        trayScale: 1,
+        localInsights: false,
+        remoteAccess: true,
+        remoteToken: "abc",
+      },
+    }),
+  );
+  api.remoteShareUrl.mockResolvedValue(url);
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    value: { writeText },
+    configurable: true,
+  });
+
+  render(<App />);
+
+  const link = await screen.findByRole("button", { name: url });
+  fireEvent.click(link);
+  expect(api.openRemoteShareUrl).toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+  expect(writeText).toHaveBeenCalledWith(url);
+  await screen.findByRole("button", { name: "Copied" });
 });
 
 test("a manual update check walks the dialog from checking to up to date", async () => {

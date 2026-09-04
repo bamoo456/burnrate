@@ -552,6 +552,12 @@ fn open_url(url: &str) {
     if !is_allowed_auth_url(url) {
         return;
     }
+    open_external(url);
+}
+
+/// Hand a URL to the OS browser. Callers own the trust decision — never pass
+/// a URL that came straight from the webview.
+pub(crate) fn open_external(url: &str) {
     #[cfg(target_os = "macos")]
     let program = "open";
     #[cfg(target_os = "linux")]
