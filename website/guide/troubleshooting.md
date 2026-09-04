@@ -98,8 +98,8 @@ Fixes:
 ## Provider CLI "failed to start" in a `.app` install
 
 Apps launched from Finder/Launchpad inherit a minimal `PATH`. Burnrate
-searches the common install locations (Homebrew, Nix, Cargo, npm/pnpm/bun
-dirs) for `codex` / `claude`; if yours lives elsewhere, point at it:
+searches the common install locations (Homebrew, Nix, Cargo, NVM,
+npm/pnpm/bun dirs) for `codex` / `claude`; if yours lives elsewhere, point at it:
 
 ```sh
 BURNRATE_CLAUDE_BIN=/path/to/claude
