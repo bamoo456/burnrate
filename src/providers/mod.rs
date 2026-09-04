@@ -842,6 +842,8 @@ fn common_bin_dirs() -> Vec<std::path::PathBuf> {
         ] {
             dirs.push(home.join(rel));
         }
+        // NVM keeps global Node CLIs under each installed Node version.
+        dirs.extend(nvm_bin_dirs(&home));
     }
     dirs.extend([
         PathBuf::from("/opt/homebrew/bin"),
@@ -859,6 +861,22 @@ fn common_bin_dirs() -> Vec<std::path::PathBuf> {
         per_user.push("bin"); // nix-darwin home-manager profile
         dirs.push(per_user);
     }
+    dirs
+}
+
+#[cfg(unix)]
+fn nvm_bin_dirs(home: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let Ok(entries) = std::fs::read_dir(home.join(".nvm/versions/node")) else {
+        return Vec::new();
+    };
+    let mut dirs: Vec<_> = entries
+        .flatten()
+        .map(|entry| entry.path())
+        .filter(|path| path.is_dir())
+        .map(|path| path.join("bin"))
+        .collect();
+    dirs.sort();
+    dirs.reverse();
     dirs
 }
 
@@ -989,6 +1007,24 @@ mod tests {
             .expect("homebrew bin");
 
         assert!(local < homebrew);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn nvm_bin_dirs_lists_installed_node_versions() {
+        let home = tempdir().expect("home dir");
+        for version in ["v20.20.2", "v22.23.0"] {
+            std::fs::create_dir_all(home.path().join(".nvm/versions/node").join(version))
+                .expect("create NVM version");
+        }
+
+        assert_eq!(
+            nvm_bin_dirs(home.path()),
+            vec![
+                home.path().join(".nvm/versions/node/v22.23.0/bin"),
+                home.path().join(".nvm/versions/node/v20.20.2/bin"),
+            ]
+        );
     }
 
     fn account() -> AccountConfig {
