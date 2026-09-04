@@ -244,7 +244,7 @@ pub(crate) fn share_url(token: &str) -> String {
 }
 
 fn share_url_for_host(host: &str, token: &str) -> String {
-    format!("http://{host}:{REMOTE_PORT}/?view=tray&t={token}")
+    format!("http://{host}:{REMOTE_PORT}/?t={token}")
 }
 
 /// The Bonjour name of this machine, e.g. `george-c-m3p.local`.
@@ -374,10 +374,10 @@ mod tests {
     }
 
     #[test]
-    fn share_url_carries_the_tray_view_and_token() {
+    fn share_url_carries_the_token() {
         let url = share_url("tok");
         assert!(url.starts_with("http://"));
-        assert!(url.ends_with(&format!(":{REMOTE_PORT}/?view=tray&t=tok")));
+        assert!(url.ends_with(&format!(":{REMOTE_PORT}/?t=tok")));
     }
 
     #[test]
@@ -390,7 +390,7 @@ mod tests {
         assert_eq!(mdns_host("localhost"), "localhost");
         assert_eq!(
             share_url_for_host("mac.local", "tok"),
-            format!("http://mac.local:{REMOTE_PORT}/?view=tray&t=tok")
+            format!("http://mac.local:{REMOTE_PORT}/?t=tok")
         );
     }
 }
