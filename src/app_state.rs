@@ -469,6 +469,7 @@ impl AppState {
                 copilot_plan: None,
                 copilot_custom_limit: None,
                 subscription_cost_usd: None,
+                subscription_renews_on: None,
                 order_index: None,
                 created_at: now,
                 updated_at: now,

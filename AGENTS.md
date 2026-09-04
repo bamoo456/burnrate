@@ -284,6 +284,11 @@ burnrate`).
   window away, which a config-declared window cannot refuse) that calls
   `open_remote_share_url` — the backend re-mints the URL from settings, so the
   command can never become a generic opener for webview-supplied URLs.
+- The dashboard's **Renews** column is derived, not stored: accounts keep a
+  `subscriptionRenewsOn` anchor (`YYYY-MM-DD`, any past
+  or future billing date the user typed) and `format.ts` rolls it forward a
+  month at a time to the next occurrence, clamping to short months. The backend
+  stores the string verbatim — keep the date math in the frontend.
 - `types.ts` mirrors the Rust wire models; `constants.ts` holds shared provider
   labels/endpoints (kept cycle-free). `Preferences.tsx`, `TrayPanel.tsx`,
   `ProviderLogo.tsx`, and `format.ts` are the focused UI pieces, plus

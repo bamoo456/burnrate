@@ -10,6 +10,7 @@ import {
   formatBalance,
   formatDashboardMetric,
   formatMonthlyCostUsd,
+  formatRenewal,
   formatReset,
   hasAwsCostData,
   nextResetBucket,
@@ -49,7 +50,16 @@ export function DashboardGrid({
   accounts?: AccountView[];
 }) {
   const costByAccount = new Map(
-    accounts.map((account) => [account.id, account.subscriptionCostUsd ?? null]),
+    accounts.map((account) => [
+      account.id,
+      account.subscriptionCostUsd ?? null,
+    ]),
+  );
+  const renewalByAccount = new Map(
+    accounts.map((account) => [
+      account.id,
+      account.subscriptionRenewsOn ?? null,
+    ]),
   );
   const totalCost = totalMonthlySubscriptionCost(accounts);
   return (
@@ -59,6 +69,7 @@ export function DashboardGrid({
           <tr>
             <th scope="col">Account</th>
             <th scope="col">Cost</th>
+            <th scope="col">Renews</th>
             <th scope="col">Balance</th>
             {windows.map((window) => (
               <th scope="col" key={window.key}>
@@ -75,6 +86,7 @@ export function DashboardGrid({
               key={snapshot.accountId}
               snapshot={snapshot}
               cost={costByAccount.get(snapshot.accountId) ?? null}
+              renewsOn={renewalByAccount.get(snapshot.accountId) ?? null}
             />
           ))}
         </tbody>
@@ -85,7 +97,7 @@ export function DashboardGrid({
               <td>
                 <strong>{formatMonthlyCostUsd(totalCost)}</strong>
               </td>
-              <td colSpan={windows.length + 2} />
+              <td colSpan={windows.length + 3} />
             </tr>
           </tfoot>
         ) : null}
@@ -97,9 +109,11 @@ export function DashboardGrid({
 function DashboardRow({
   snapshot,
   cost,
+  renewsOn,
 }: {
   snapshot: UsageSnapshot;
   cost: number | null;
+  renewsOn: string | null;
 }) {
   const resetBucket = nextResetBucket(snapshot);
   return (
@@ -110,6 +124,7 @@ function DashboardRow({
       <td>
         <CostMetric cost={cost} />
       </td>
+      <td className="dashboard-renews-cell">{formatRenewal(renewsOn)}</td>
       <td>
         <BalanceMetric snapshot={snapshot} />
       </td>

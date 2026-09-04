@@ -107,6 +107,22 @@ export function AccountFields({
         />
       </label>
 
+      {/* Any billing date will do — the dashboard rolls it forward to the next
+          occurrence, so it never needs updating. */}
+      <label>
+        Renews on (any billing date, optional)
+        <input
+          type="date"
+          value={form.subscriptionRenewsOn ?? ""}
+          onChange={(event) =>
+            setForm((current) => ({
+              ...current,
+              subscriptionRenewsOn: event.target.value || null,
+            }))
+          }
+        />
+      </label>
+
       <label className="toggle">
         <input
           type="checkbox"

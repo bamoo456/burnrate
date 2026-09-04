@@ -468,6 +468,7 @@ export function App() {
             ? (input.copilotCustomLimit ?? null)
             : null,
         subscriptionCostUsd: input.subscriptionCostUsd ?? null,
+        subscriptionRenewsOn: input.subscriptionRenewsOn ?? null,
       });
       updateAccounts(accounts, settings, summary);
       const dashboard = await guardedFetch({ force: true });

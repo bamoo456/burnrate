@@ -17,7 +17,7 @@ use crate::{
     models::{AccountConfig, AppSettings, AwsCategoryConfig, AwsCostFilter, AwsGroupBy},
 };
 
-const LATEST_SCHEMA_VERSION: i64 = 4;
+const LATEST_SCHEMA_VERSION: i64 = 5;
 
 pub(crate) struct ConfigStore {
     conn: Mutex<Connection>,
@@ -255,6 +255,17 @@ fn run_migrations(conn: &mut Connection) -> Result<()> {
         )?;
         tx.commit()?;
     }
+    if version < 5 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(
+            r#"
+            ALTER TABLE accounts ADD COLUMN subscription_renews_on TEXT;
+
+            PRAGMA user_version = 5;
+            "#,
+        )?;
+        tx.commit()?;
+    }
     Ok(())
 }
 
@@ -358,6 +369,7 @@ fn load_accounts(conn: &Connection) -> Result<Vec<AccountConfig>> {
             copilot_plan,
             copilot_custom_limit,
             subscription_cost_usd,
+            subscription_renews_on,
             order_index,
             created_at,
             updated_at
@@ -386,9 +398,10 @@ fn load_accounts(conn: &Connection) -> Result<Vec<AccountConfig>> {
                 copilot_plan: row.get(15)?,
                 copilot_custom_limit: row.get(16)?,
                 subscription_cost_usd: row.get(17)?,
-                order_index: row.get(18)?,
-                created_at: row.get(19)?,
-                updated_at: row.get(20)?,
+                subscription_renews_on: row.get(18)?,
+                order_index: row.get(19)?,
+                created_at: row.get(20)?,
+                updated_at: row.get(21)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -415,6 +428,7 @@ struct AccountRow {
     copilot_plan: Option<String>,
     copilot_custom_limit: Option<f64>,
     subscription_cost_usd: Option<f64>,
+    subscription_renews_on: Option<String>,
     order_index: Option<i64>,
     created_at: String,
     updated_at: String,
@@ -443,6 +457,7 @@ impl AccountRow {
             copilot_plan: self.copilot_plan.as_deref().map(from_wire).transpose()?,
             copilot_custom_limit: self.copilot_custom_limit,
             subscription_cost_usd: self.subscription_cost_usd,
+            subscription_renews_on: self.subscription_renews_on,
             order_index: self.order_index,
             created_at: parse_timestamp(&self.created_at)?,
             updated_at: parse_timestamp(&self.updated_at)?,
@@ -528,11 +543,12 @@ fn save_config_tx(tx: &Transaction<'_>, config: &AppConfig) -> Result<()> {
                 copilot_plan,
                 copilot_custom_limit,
                 subscription_cost_usd,
+                subscription_renews_on,
                 order_index,
                 created_at,
                 updated_at
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)
             "#,
             params![
                 account.id,
@@ -553,6 +569,7 @@ fn save_config_tx(tx: &Transaction<'_>, config: &AppConfig) -> Result<()> {
                 account.copilot_plan.as_ref().map(to_wire).transpose()?,
                 account.copilot_custom_limit,
                 account.subscription_cost_usd,
+                account.subscription_renews_on,
                 account.order_index,
                 format_timestamp(&account.created_at),
                 format_timestamp(&account.updated_at),
@@ -724,6 +741,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
         config.accounts[0].email = Some("aws@example.test".to_string());
         config.accounts[0].order_index = Some(2);
@@ -776,7 +794,8 @@ mod tests {
             aws_categories: Vec::new(),
             copilot_plan: Some(CopilotPlan::Custom),
             copilot_custom_limit: Some(2500.0),
-            subscription_cost_usd: None,
+            subscription_cost_usd: Some(39.0),
+            subscription_renews_on: Some("2026-01-31".to_string()),
         });
 
         store.save_config(&config).unwrap();
@@ -786,6 +805,12 @@ mod tests {
         assert_eq!(loaded.accounts[0].provider, ProviderKind::Copilot);
         assert_eq!(loaded.accounts[0].copilot_plan, Some(CopilotPlan::Custom));
         assert_eq!(loaded.accounts[0].copilot_custom_limit, Some(2500.0));
+        assert_eq!(loaded.accounts[0].subscription_cost_usd, Some(39.0));
+        assert_eq!(
+            loaded.accounts[0].subscription_renews_on.as_deref(),
+            Some("2026-01-31"),
+            "the renewal anchor survives the sqlite round trip"
+        );
     }
 
     /// Build a database exactly as schema v1 wrote it (pre-Copilot, no
@@ -996,6 +1021,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: Some(100.0),
+            subscription_renews_on: None,
         });
         store.save_config(&config).unwrap();
 
@@ -1031,6 +1057,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
         config::save_to_path(&json_path, &legacy).unwrap();
 
@@ -1089,6 +1116,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
         config::save_to_path(&backup_path, &backup).unwrap();
 
@@ -1164,6 +1192,7 @@ mod tests {
             copilot_plan: None,
             copilot_custom_limit: None,
             subscription_cost_usd: None,
+            subscription_renews_on: None,
         });
         store.save_config(&first).unwrap();
 
