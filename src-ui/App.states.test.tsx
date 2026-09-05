@@ -529,8 +529,8 @@ test("leaves native tray scale unchanged when the slider is already at 100%", as
   expect(api.saveSettings).not.toHaveBeenCalled();
 });
 
-test("the share link opens through the backend and copies to the clipboard", async () => {
-  const url = "http://mac:17877/?view=tray&t=abc";
+test("the share link opens through the backend and the token copies separately", async () => {
+  const url = "http://mac:17877/";
   api.guardedFetch.mockResolvedValue(
     dashboardState({
       settings: {
@@ -559,6 +559,24 @@ test("the share link opens through the backend and copies to the clipboard", asy
   fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
   expect(writeText).toHaveBeenCalledWith(url);
   await screen.findByRole("button", { name: "Copied" });
+
+  // The token lives in its own editable field, not baked into the link.
+  const field = screen.getByLabelText("Access token") as HTMLInputElement;
+  expect(field.value).toBe("abc");
+  fireEvent.click(screen.getByRole("button", { name: "Copy token" }));
+  expect(writeText).toHaveBeenCalledWith("abc");
+
+  // Editing commits on blur, and a blank edit is ignored.
+  fireEvent.change(field, { target: { value: "  my-secret  " } });
+  fireEvent.blur(field);
+  expect(api.saveSettings).toHaveBeenCalledWith(
+    expect.objectContaining({ remoteToken: "my-secret" }),
+  );
+  api.saveSettings.mockClear();
+  fireEvent.change(field, { target: { value: "   " } });
+  fireEvent.blur(field);
+  expect(api.saveSettings).not.toHaveBeenCalled();
+  expect(field.value).toBe("my-secret");
 });
 
 test("a manual update check walks the dialog from checking to up to date", async () => {

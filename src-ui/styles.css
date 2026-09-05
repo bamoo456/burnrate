@@ -1051,6 +1051,28 @@ p {
   margin: 10px 0 0;
 }
 
+.remote-token {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 0;
+  color: var(--fg-soft);
+  font-size: 12px;
+}
+
+.remote-token input {
+  flex: 1;
+  min-width: 0;
+  min-height: 30px;
+  border: 1px solid var(--field-border);
+  border-radius: 8px;
+  background: var(--field-bg);
+  padding: 5px 8px;
+  color: var(--fg);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
 .remote-share-url .share-link {
   flex: 1;
   min-width: 0;

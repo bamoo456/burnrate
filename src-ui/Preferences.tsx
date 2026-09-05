@@ -6,7 +6,7 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import { AccountModal, type AccountModalMode } from "./AccountModal";
 import { DashboardGrid } from "./DashboardGrid";
 import {
@@ -48,7 +48,10 @@ export interface RemoteAccessPanelProps {
   enabled: boolean;
   /** Link to open on the phone; `null` until the backend has minted a token. */
   shareUrl: string | null;
+  /** The Basic-auth password the served page asks for. */
+  token: string;
   onEnabledChange: (enabled: boolean) => void;
+  onTokenChange: (token: string) => void;
   onOpenShareUrl: () => void;
 }
 
@@ -382,22 +385,76 @@ function TraySettings({
   );
 }
 
-function RemoteAccessSettings({
-  enabled,
-  shareUrl,
-  onEnabledChange,
-  onOpenShareUrl,
-}: RemoteAccessPanelProps) {
+/// Copy `value` to the clipboard, reporting the outcome in the button label.
+function CopyButton({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState<"ok" | "failed" | null>(null);
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText(shareUrl ?? "");
+      await navigator.clipboard.writeText(value);
       setCopied("ok");
     } catch {
       setCopied("failed");
     }
     setTimeout(() => setCopied(null), 2000);
   };
+  return (
+    <button type="button" onClick={() => void copy()}>
+      {copied === "ok" ? "Copied" : copied === "failed" ? "Copy failed" : label}
+    </button>
+  );
+}
+
+/// The token as an editable field. Committed on blur or Enter rather than per
+/// keystroke: every save restarts the HTTP server, and a half-typed token would
+/// lock out the phone mid-word. A backend-minted value re-seeds the draft
+/// (re-mounting on `key={token}` would instead swallow the click that follows
+/// a commit).
+function TokenField({
+  token,
+  onTokenChange,
+}: Pick<RemoteAccessPanelProps, "token" | "onTokenChange">) {
+  const [draft, setDraft] = useState(token);
+  useEffect(() => setDraft(token), [token]);
+  const commit = () => {
+    const next = draft.trim();
+    if (!next) {
+      setDraft(token); // Blank means "keep it", which is what the backend does.
+      return;
+    }
+    if (next !== token) {
+      onTokenChange(next);
+    }
+  };
+  return (
+    <p className="remote-token">
+      <label htmlFor="remote-token-input">Access token</label>
+      <input
+        id="remote-token-input"
+        value={draft}
+        spellCheck={false}
+        autoCapitalize="off"
+        autoCorrect="off"
+        onChange={(event) => setDraft(event.target.value)}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            event.currentTarget.blur();
+          }
+        }}
+      />
+      <CopyButton value={token} label="Copy token" />
+    </p>
+  );
+}
+
+function RemoteAccessSettings({
+  enabled,
+  shareUrl,
+  token,
+  onEnabledChange,
+  onTokenChange,
+  onOpenShareUrl,
+}: RemoteAccessPanelProps) {
   return (
     <section className="prefs-remote" aria-label="Web access">
       <SectionTitle title="Web access" detail="Read-only" />
@@ -411,28 +468,30 @@ function RemoteAccessSettings({
           <strong>Serve the tray view on this network</strong>
           <small>
             Open the link below on a phone or another computer to watch quota.
-            The page is read-only; anyone with the link can see your usage and
-            account emails, so keep it to a trusted network or Tailscale.
+            The browser asks for a password: leave the user name blank and paste
+            the access token. The page is read-only, but it shows your usage and
+            account emails, so keep the token to yourself.
           </small>
         </span>
       </label>
       {enabled && shareUrl ? (
-        <p className="remote-share-url">
-          {/* Deliberately not an <a href>: WKWebView turns a drag on a link
-              into a link-drag (killing text selection) and its context-menu
-              "Open Link" would navigate this window away, which a
-              config-declared window cannot refuse. The backend opens it. */}
-          <button type="button" className="share-link" onClick={onOpenShareUrl}>
-            {shareUrl}
-          </button>
-          <button type="button" onClick={() => void copy()}>
-            {copied === "ok"
-              ? "Copied"
-              : copied === "failed"
-                ? "Copy failed"
-                : "Copy link"}
-          </button>
-        </p>
+        <>
+          <p className="remote-share-url">
+            {/* Deliberately not an <a href>: WKWebView turns a drag on a link
+                into a link-drag (killing text selection) and its context-menu
+                "Open Link" would navigate this window away, which a
+                config-declared window cannot refuse. The backend opens it. */}
+            <button
+              type="button"
+              className="share-link"
+              onClick={onOpenShareUrl}
+            >
+              {shareUrl}
+            </button>
+            <CopyButton value={shareUrl} label="Copy link" />
+          </p>
+          <TokenField token={token} onTokenChange={onTokenChange} />
+        </>
       ) : null}
     </section>
   );

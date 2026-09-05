@@ -125,8 +125,9 @@ pub(crate) struct AppSettings {
     #[serde(default)]
     pub remote_access: bool,
     /// Shared secret for `remote_access`, minted by the backend the first time
-    /// the toggle is turned on. The UI only ever displays it inside the share
-    /// URL; it is never edited from the frontend.
+    /// the toggle is turned on. It is the HTTP Basic **password** the served
+    /// page asks for — Preferences shows it next to the share link so it can be
+    /// copied, and it is never edited from the frontend.
     #[serde(default)]
     pub remote_token: String,
 }

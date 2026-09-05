@@ -188,7 +188,7 @@ let mockSettings: AppSettings = {
   trayScale: 1,
   localInsights: true,
   remoteAccess: false,
-  remoteToken: "",
+  remoteToken: "mock-token",
 };
 
 const mockSnapshots: UsageSnapshot[] = [

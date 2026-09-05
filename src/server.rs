@@ -3,8 +3,8 @@
 //! (or Tailscale) can watch quota without a native client.
 //!
 //! Read-only on purpose. Sign-in, account edits, and settings stay in the
-//! desktop app; the served page is the tray view, whose write paths already
-//! no-op outside Tauri.
+//! desktop app; the served page is the remote dashboard, whose write paths
+//! already no-op outside Tauri.
 //!
 //! Assets come from Tauri's embedded asset resolver, which only holds them when
 //! the `custom-protocol` feature is on — `npm run dev` disables it, so remote
@@ -12,16 +12,18 @@
 
 use std::sync::Mutex;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
+
 use axum::{
     Router,
     body::Body,
-    extract::{Query, Request, State},
-    http::{HeaderValue, StatusCode, header},
+    extract::{Request, State},
+    http::{StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::get,
 };
-use serde::Deserialize;
 use tauri::async_runtime::JoinHandle;
 use tauri::{AppHandle, Manager};
 
@@ -31,7 +33,6 @@ use crate::models::AppSettings;
 /// Fixed port. Not configurable: one less setting, and the share URL stays
 /// stable across restarts so a home-screen bookmark keeps working.
 pub(crate) const REMOTE_PORT: u16 = 17877;
-const TOKEN_COOKIE: &str = "burnrate_token";
 /// Marker the frontend keys "remote mode" off (`api.ts`): fetch the JSON API
 /// instead of Tauri IPC, and hide desktop-only controls.
 const REMOTE_MARKER: &str = "<head><script>window.__BURNRATE_REMOTE__=1</script>";
@@ -97,7 +98,7 @@ async fn serve(state: ServerState) -> anyhow::Result<()> {
         .fallback(asset)
         .layer(middleware::from_fn_with_state(
             state.token.clone(),
-            require_token,
+            require_password,
         ))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(("0.0.0.0", REMOTE_PORT)).await?;
@@ -105,49 +106,49 @@ async fn serve(state: ServerState) -> anyhow::Result<()> {
     Ok(())
 }
 
-#[derive(Deserialize)]
-struct TokenQuery {
-    t: Option<String>,
-}
-
-/// Gate every request on the shared token, taken from `?t=` (the share link) or
-/// the cookie a previous `?t=` set (so a home-screen bookmark keeps working).
-async fn require_token(
-    State(token): State<String>,
-    Query(query): Query<TokenQuery>,
-    request: Request,
-    next: Next,
-) -> Response {
-    let from_query = query.t.as_deref().is_some_and(|t| t == token);
-    let authorized = from_query
-        || cookie_token(request.headers().get(header::COOKIE)).is_some_and(|value| value == token);
-    if !authorized {
+/// Gate every request on the token, supplied as the **password** of HTTP Basic
+/// auth (the username is ignored). Basic keeps the share link free of secrets —
+/// a URL leaks into history, screenshots and the address bar — and the browser
+/// replays the credential on every request, so a home-screen bookmark keeps
+/// working without a cookie of our own.
+///
+/// ponytail: plain `==` compare, no constant-time, and no attempt limit. A
+/// minted token is 32 random hex chars on a LAN, with no realistic timing
+/// oracle to close; the strength of a user-chosen one is on the user.
+///
+/// ponytail: iOS "Add to Home Screen" runs in a standalone context that does
+/// not share Safari's Basic-auth cache, so it can re-prompt per launch. Live
+/// with it; a cookie fallback would put the secret back on the wire in a URL.
+async fn require_password(State(token): State<String>, request: Request, next: Next) -> Response {
+    let supplied = basic_auth_password(
+        request
+            .headers()
+            .get(header::AUTHORIZATION)
+            .and_then(|value| value.to_str().ok()),
+    );
+    if supplied.as_deref() != Some(token.as_str()) {
+        // Without `WWW-Authenticate` the browser never shows a prompt.
         return (
             StatusCode::UNAUTHORIZED,
-            "Burnrate: invalid or missing token",
+            [(
+                header::WWW_AUTHENTICATE,
+                r#"Basic realm="Burnrate", charset="UTF-8""#,
+            )],
+            "Burnrate: paste the access token as the password",
         )
             .into_response();
     }
-
-    let mut response = next.run(request).await;
-    if from_query {
-        // No `Secure`: this is plain HTTP on a LAN. `SameSite=Lax` still keeps
-        // it off cross-site requests.
-        if let Ok(cookie) = HeaderValue::from_str(&format!(
-            "{TOKEN_COOKIE}={token}; Path=/; Max-Age=31536000; SameSite=Lax"
-        )) {
-            response.headers_mut().append(header::SET_COOKIE, cookie);
-        }
-    }
-    response
+    next.run(request).await
 }
 
-pub(crate) fn cookie_token(header: Option<&HeaderValue>) -> Option<String> {
-    let raw = header?.to_str().ok()?;
-    raw.split(';')
-        .filter_map(|pair| pair.split_once('='))
-        .find(|(name, _)| name.trim() == TOKEN_COOKIE)
-        .map(|(_, value)| value.trim().to_string())
+/// The password half of an `Authorization: Basic <base64(user:password)>`
+/// header. The username is whatever the user typed into the browser prompt.
+pub(crate) fn basic_auth_password(header: Option<&str>) -> Option<String> {
+    let encoded = header?.strip_prefix("Basic ")?.trim();
+    let decoded = BASE64.decode(encoded).ok()?;
+    let pair = String::from_utf8(decoded).ok()?;
+    // A password may contain ':'; only the first separator counts.
+    Some(pair.split_once(':')?.1.to_string())
 }
 
 async fn dashboard(State(state): State<ServerState>) -> Response {
@@ -239,12 +240,12 @@ fn strip_csp_meta(html: &str) -> String {
 ///
 /// ponytail: mDNS is not resolvable from most Android browsers; those users
 /// need the LAN IP, which the UI does not offer yet.
-pub(crate) fn share_url(token: &str) -> String {
-    share_url_for_host(&share_host(), token)
+pub(crate) fn share_url() -> String {
+    share_url_for_host(&share_host())
 }
 
-fn share_url_for_host(host: &str, token: &str) -> String {
-    format!("http://{host}:{REMOTE_PORT}/?t={token}")
+fn share_url_for_host(host: &str) -> String {
+    format!("http://{host}:{REMOTE_PORT}/")
 }
 
 /// The Bonjour name of this machine, e.g. `george-c-m3p.local`.
@@ -298,16 +299,25 @@ mod tests {
     }
 
     #[test]
-    fn reads_the_token_cookie_among_others() {
-        let header = HeaderValue::from_static("theme=dark; burnrate_token=abc123; other=1");
-        assert_eq!(cookie_token(Some(&header)).as_deref(), Some("abc123"));
+    fn reads_the_password_half_of_a_basic_header() {
+        let header = format!("Basic {}", BASE64.encode("anyone:abc123"));
+        assert_eq!(
+            basic_auth_password(Some(&header)).as_deref(),
+            Some("abc123")
+        );
+        // A ':' inside the password belongs to the password.
+        let odd = format!("Basic {}", BASE64.encode("u:a:b"));
+        assert_eq!(basic_auth_password(Some(&odd)).as_deref(), Some("a:b"));
     }
 
     #[test]
-    fn ignores_a_missing_or_unrelated_cookie() {
-        let header = HeaderValue::from_static("theme=dark");
-        assert_eq!(cookie_token(Some(&header)), None);
-        assert_eq!(cookie_token(None), None);
+    fn ignores_a_missing_or_malformed_authorization_header() {
+        assert_eq!(basic_auth_password(None), None);
+        assert_eq!(basic_auth_password(Some("Bearer abc")), None);
+        assert_eq!(basic_auth_password(Some("Basic !!not-base64")), None);
+        // No ':' separator at all.
+        let bare = format!("Basic {}", BASE64.encode("nocolon"));
+        assert_eq!(basic_auth_password(Some(&bare)), None);
     }
 
     #[test]
@@ -323,17 +333,18 @@ mod tests {
         assert!(injected.contains("<title>Burnrate</title>"));
     }
 
-    /// End-to-end through the real middleware on a throwaway port: no token is
-    /// rejected, `?t=` is accepted and hands back the cookie, and that cookie
-    /// alone authorizes the next request.
+    /// End-to-end through the real middleware on a throwaway port: no
+    /// credential is rejected with a prompt-triggering challenge, a wrong
+    /// password is rejected, and the token as the password gets in whatever
+    /// username the browser sent.
     #[tokio::test]
-    async fn token_gate_rejects_then_accepts_and_sets_a_cookie() {
+    async fn password_gate_challenges_then_accepts_the_token() {
         let router =
             Router::new()
                 .fallback(|| async { "ok" })
                 .layer(middleware::from_fn_with_state(
                     "secret".to_string(),
-                    require_token,
+                    require_password,
                 ));
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -346,38 +357,37 @@ mod tests {
         let client = reqwest::Client::new();
         let denied = client.get(&base).send().await.unwrap();
         assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
+        assert!(
+            denied
+                .headers()
+                .get(header::WWW_AUTHENTICATE)
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .starts_with("Basic realm=")
+        );
 
-        let wrong = client.get(format!("{base}/?t=nope")).send().await.unwrap();
+        let wrong = client
+            .get(&base)
+            .basic_auth("burnrate", Some("nope"))
+            .send()
+            .await
+            .unwrap();
         assert_eq!(wrong.status(), reqwest::StatusCode::UNAUTHORIZED);
 
         let allowed = client
-            .get(format!("{base}/?t=secret"))
+            .get(&base)
+            .basic_auth("", Some("secret"))
             .send()
             .await
             .unwrap();
         assert!(allowed.status().is_success());
-        let cookie = allowed
-            .headers()
-            .get(header::SET_COOKIE)
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or_default()
-            .to_string();
-        assert!(cookie.starts_with("burnrate_token=secret"));
-
-        let with_cookie = client
-            .get(&base)
-            .header(header::COOKIE, "burnrate_token=secret")
-            .send()
-            .await
-            .unwrap();
-        assert!(with_cookie.status().is_success());
     }
 
     #[test]
-    fn share_url_carries_the_token() {
-        let url = share_url("tok");
+    fn share_url_keeps_the_token_out_of_the_link() {
+        let url = share_url();
         assert!(url.starts_with("http://"));
-        assert!(url.ends_with(&format!(":{REMOTE_PORT}/?t=tok")));
+        assert!(url.ends_with(&format!(":{REMOTE_PORT}/")));
     }
 
     #[test]
@@ -389,8 +399,8 @@ mod tests {
         );
         assert_eq!(mdns_host("localhost"), "localhost");
         assert_eq!(
-            share_url_for_host("mac.local", "tok"),
-            format!("http://mac.local:{REMOTE_PORT}/?t=tok")
+            share_url_for_host("mac.local"),
+            format!("http://mac.local:{REMOTE_PORT}/")
         );
     }
 }

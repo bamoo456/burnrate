@@ -131,9 +131,10 @@ burnrate`).
   `/api/local-usage`. The share link names the machine's Bonjour
   `.local` host, not a bare `hostname` — on a managed Mac a corporate search
   domain resolves the bare name to a stale VPN/hotspot lease. Every request is
-  gated on a backend-minted token supplied
-  as `?t=` (the share link) or the cookie that a valid `?t=` sets, so a
-  home-screen bookmark keeps working. `index.html` is rewritten on the way out:
+  gated on a backend-minted token supplied as the **HTTP Basic password**
+  (any user name) — so the share link itself carries no secret and the browser
+  replays the credential, keeping a home-screen bookmark working without a
+  cookie of our own. Preferences shows the token beside the link to copy. `index.html` is rewritten on the way out:
   a `window.__BURNRATE_REMOTE__` marker (which `src-ui/api.ts` keys remote mode
   off) is injected and any CSP `<meta>` stripped, since the desktop policy would
   block the page's own `/api` calls. `RemoteServer::apply` is called at startup
@@ -283,7 +284,8 @@ burnrate`).
   The tray-window auto-resize effect is skipped for the same reason (no native
   window to fit), and `main.tsx` withholds `data-view="tray"` so a `?view=tray`
   bookmark predating this cannot drag popover styling in. The share link is
-  just `/?t=…`. In Preferences it renders as a
+  just `http://<host>.local:17877/`; the token is a separate copyable row
+  (the browser prompts for it). In Preferences the link renders as a
   selectable link-styled **button** (not an `<a href>`: WKWebView's link-drag
   breaks text selection and its "Open Link" context item would navigate the
   window away, which a config-declared window cannot refuse) that calls
