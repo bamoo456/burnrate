@@ -184,7 +184,8 @@ export function App() {
     // also migrates older upstream settings away from local session scanning.
     localInsights: false,
     remoteAccess: state?.settings?.remoteAccess ?? false,
-    // Backend-owned; round-tripped untouched so a save can't clear it.
+    // User-settable, but round-tripped untouched by every other save; the
+    // backend keeps the stored token when a save carries a blank one.
     remoteToken: state?.settings?.remoteToken ?? "",
   };
 
@@ -220,6 +221,13 @@ export function App() {
       return;
     }
     await updateSettings({ ...settings, remoteAccess });
+  }
+
+  async function onRemoteTokenChange(nextToken: string) {
+    if (nextToken === settings.remoteToken) {
+      return;
+    }
+    await updateSettings({ ...settings, remoteToken: nextToken });
   }
 
   async function onTrayScaleChange(trayScale: number) {
@@ -616,7 +624,9 @@ export function App() {
         remote={{
           enabled: settings.remoteAccess,
           shareUrl: remoteUrl,
+          token: remoteToken,
           onEnabledChange: (enabled) => void onRemoteAccessChange(enabled),
+          onTokenChange: (nextToken) => void onRemoteTokenChange(nextToken),
           onOpenShareUrl: () => void openRemoteShareUrl(),
         }}
         updates={{

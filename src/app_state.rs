@@ -128,8 +128,11 @@ impl AppState {
     pub(crate) fn save_settings(&self, settings: AppSettings) -> Result<AppSettings> {
         self.update_config(|config| {
             let mut settings = settings;
-            settings.remote_token =
-                resolve_remote_token(&config.settings.remote_token, settings.remote_access);
+            settings.remote_token = resolve_remote_token(
+                &config.settings.remote_token,
+                &settings.remote_token,
+                settings.remote_access,
+            );
             config.settings = settings;
             Ok(config.settings.clone())
         })
@@ -861,11 +864,17 @@ fn cleanup_managed_dir(dir: Option<&str>) {
     }
 }
 
-/// The remote-access token is backend-owned: the UI round-trips whatever it was
-/// handed, so the stored token always wins, and a fresh one is minted only when
-/// the toggle first goes on. Turning access off keeps the token, so an existing
-/// share link survives a toggle.
-fn resolve_remote_token(stored: &str, remote_access: bool) -> String {
+/// The remote-access token the user types wins, trimmed — the surrounding
+/// whitespace of a paste would silently break the Basic-auth compare. An empty
+/// submission keeps the stored token (so the settings saves that carry no token
+/// edit, like the tray-scale slider, cannot clear it) and mints a fresh one the
+/// first time access goes on. Turning access off keeps the token, so an
+/// existing credential survives a toggle.
+fn resolve_remote_token(stored: &str, submitted: &str, remote_access: bool) -> String {
+    let submitted = submitted.trim();
+    if !submitted.is_empty() {
+        return submitted.to_string();
+    }
     if remote_access && stored.is_empty() {
         return uuid::Uuid::new_v4().simple().to_string();
     }
@@ -879,26 +888,44 @@ mod tests {
 
     #[test]
     fn mints_a_remote_token_once_and_then_keeps_it() {
-        let minted = resolve_remote_token("", true);
+        let minted = resolve_remote_token("", "", true);
         assert_eq!(minted.len(), 32, "uuid simple form");
         assert_eq!(
-            resolve_remote_token(&minted, true),
+            resolve_remote_token(&minted, &minted, true),
             minted,
             "stable while on"
         );
         assert_eq!(
-            resolve_remote_token(&minted, false),
+            resolve_remote_token(&minted, "", false),
             minted,
             "survives a toggle off"
         );
         assert!(
-            resolve_remote_token("", false).is_empty(),
+            resolve_remote_token("", "", false).is_empty(),
             "never minted while off"
         );
         assert_ne!(
-            resolve_remote_token("", true),
+            resolve_remote_token("", "", true),
             minted,
             "each mint is distinct"
+        );
+    }
+
+    #[test]
+    fn a_user_supplied_remote_token_wins_and_is_trimmed() {
+        assert_eq!(
+            resolve_remote_token("minted", "  my-secret \n", true),
+            "my-secret"
+        );
+        assert_eq!(
+            resolve_remote_token("minted", "   ", true),
+            "minted",
+            "a blank edit keeps the stored token"
+        );
+        assert_eq!(
+            resolve_remote_token("", "mine", false),
+            "mine",
+            "settable while access is off"
         );
     }
 

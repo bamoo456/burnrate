@@ -79,8 +79,7 @@ fn save_settings(
 #[tauri::command]
 fn remote_share_url(state: State<'_, AppState>) -> Option<String> {
     let settings = state.settings();
-    (settings.remote_access && !settings.remote_token.is_empty())
-        .then(|| server::share_url(&settings.remote_token))
+    (settings.remote_access && !settings.remote_token.is_empty()).then(server::share_url)
 }
 
 /// Open the share link in the OS browser. The URL is re-minted here rather
