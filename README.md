@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey)](https://github.com/bamoo456/burnrate/releases/latest)
 
-Desktop usage monitor for Claude Code, Codex, GitHub Copilot, Antigravity, OpenCode Go, OpenRouter, Runpod, and AWS quotas, credits, spend, and subscription limits. Built with Tauri 2 (Rust + React/TypeScript) and lives in the system tray (the menu bar on macOS).
+Desktop usage monitor for Claude Code, Codex, GitHub Copilot, Antigravity, Cursor, OpenCode Go, OpenRouter, Runpod, and AWS quotas, credits, spend, and subscription limits. Built with Tauri 2 (Rust + React/TypeScript) and lives in the system tray (the menu bar on macOS).
 
 > **Fork notice.** This is a fork of [jamesbrink/burnrate](https://github.com/jamesbrink/burnrate) that adds the Antigravity provider and deliberately removes all local-filesystem session scanning: accounts are added explicitly instead of auto-detected, and claudex-backed local usage insights are disabled. See [Differences from upstream](#differences-from-upstream).
 
@@ -28,7 +28,7 @@ Desktop usage monitor for Claude Code, Codex, GitHub Copilot, Antigravity, OpenC
 - Menu-bar tray summary with a left-click usage popover and right-click actions (Preferences, Refresh, Quit).
 - Native translucent (vibrancy) popover on macOS that follows the system light/dark appearance, sizes itself to its content, and dismisses when it loses focus.
 - Native Preferences window for account management and provider setup.
-- **Accounts are added explicitly** — Burnrate never scans your filesystem to discover them. Claude Code and Codex sign in from the app via browser OAuth; OpenRouter, Runpod, and OpenCode Go take an API key; AWS uses your existing profile/default credential chain; Antigravity reads quota through the `agy` CLI you are already signed in to.
+- **Accounts are added explicitly** — Burnrate never scans your filesystem to discover them. Claude Code and Codex sign in from the app via browser OAuth; OpenRouter, Runpod, and OpenCode Go take an API key; AWS uses your existing profile/default credential chain; Antigravity reads quota through the `agy` CLI you are already signed in to; Cursor reads usage through the `cursor-agent` CLI.
 - **Multiple Claude Code and Codex accounts**, each signed in from the app via browser OAuth and shown with its email address and usage.
 - **Drag to reorder** accounts — reorder the tray usage cards or the Preferences list; the order persists across both windows.
 - Claude Code subscription buckets (5-hour, weekly, model-specific) with stale-auth checks via `claude auth status`.
@@ -36,6 +36,7 @@ Desktop usage monitor for Claude Code, Codex, GitHub Copilot, Antigravity, OpenC
 - **GitHub Copilot premium requests** per month against your plan's allowance, read from the billing API. Requires a GitHub token (a classic PAT — the billing endpoints reject fine-grained tokens).
 - **Antigravity** weekly and five-hour quota for both model pools (Gemini, Claude + GPT), plus account email and plan, read from the `agy` CLI's local quota server.
 - **OpenCode Go** rolling, weekly, and monthly usage from your Zen API key.
+- **Cursor** included-usage pool for the current billing period.
 - Runpod prepaid balance, current spend, burn-rate runway, active resources, and recent Pods/Serverless/storage costs.
 - AWS Cost Explorer month-to-date USD spend with optional monthly budgets and configurable service/tag/cost-category buckets such as Bedrock, EC2 compute, and S3.
 - Secrets in the OS keyring by default, with an explicit plaintext fallback.
@@ -77,7 +78,7 @@ Setup, provider specifics (including AWS permissions), configuration, and troubl
 
 - [Getting started](https://bamoo456.github.io/burnrate/guide/getting-started) — accounts, browser sign-in, multi-account isolation
 - [Configuration](https://bamoo456.github.io/burnrate/guide/configuration) — storage paths, secrets, environment variables
-- [Providers](https://bamoo456.github.io/burnrate/providers/claude-code) — Claude Code, Codex, GitHub Copilot, Antigravity, OpenCode Go, OpenRouter, Runpod, AWS
+- [Providers](https://bamoo456.github.io/burnrate/providers/claude-code) — Claude Code, Codex, GitHub Copilot, Antigravity, Cursor, OpenCode Go, OpenRouter, Runpod, AWS
 - [Troubleshooting](https://bamoo456.github.io/burnrate/guide/troubleshooting) — keychain prompts, CLI discovery, stale auth
 
 ## Development

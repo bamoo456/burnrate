@@ -75,6 +75,7 @@ export default defineConfig({
           { text: "Codex", link: "/providers/codex" },
           { text: "GitHub Copilot", link: "/providers/github-copilot" },
           { text: "Antigravity", link: "/providers/antigravity" },
+          { text: "Cursor", link: "/providers/cursor" },
           { text: "OpenCode Go", link: "/providers/opencode-go" },
           { text: "OpenRouter", link: "/providers/openrouter" },
           { text: "Runpod", link: "/providers/runpod" },

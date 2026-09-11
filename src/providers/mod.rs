@@ -3,6 +3,7 @@ mod aws;
 mod claude;
 mod codex;
 mod copilot;
+mod cursor;
 pub(crate) mod login;
 mod opencode_go;
 mod openrouter;
@@ -91,6 +92,7 @@ impl ProviderClient {
             ProviderKind::OpenRouter => openrouter::fetch(&self.http, account).await,
             ProviderKind::OpenCodeGo => opencode_go::fetch(&self.http, account).await,
             ProviderKind::Runpod => runpod::fetch(&self.http, account).await,
+            ProviderKind::Cursor => cursor::fetch(&self.http, account).await,
             ProviderKind::Aws => match aws::fetch(account).await {
                 Ok(snapshot) => Ok(snapshot),
                 Err(error) => {
@@ -715,8 +717,12 @@ fn token_pointers(provider: ProviderKind) -> &'static [&'static str] {
         }
         // AWS uses the SDK credential chain; Copilot's optional GitHub token
         // lives in the key store, which `token_from_config` checks first;
-        // Antigravity's auth is owned entirely by the `agy` CLI.
-        ProviderKind::Aws | ProviderKind::Copilot | ProviderKind::Antigravity => &[],
+        // Antigravity's auth is owned entirely by the `agy` CLI, Cursor's by
+        // the `cursor-agent` CLI.
+        ProviderKind::Aws
+        | ProviderKind::Copilot
+        | ProviderKind::Antigravity
+        | ProviderKind::Cursor => &[],
     }
 }
 

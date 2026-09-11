@@ -20,6 +20,7 @@ export const providerLabels: Record<ProviderKind, string> = {
   aws: "AWS",
   copilot: "GitHub Copilot",
   antigravity: "Antigravity",
+  cursor: "Cursor",
 };
 
 /** GitHub Copilot plans and their monthly premium-request allowances
@@ -109,6 +110,7 @@ export const PROVIDERS: ProviderKind[] = [
   "openrouter",
   "copilot",
   "antigravity",
+  "cursor",
   "aws",
   "runpod",
 ];

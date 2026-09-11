@@ -11,6 +11,7 @@ pub(crate) enum ProviderKind {
     #[serde(rename = "opencode-go", alias = "open-code-go")]
     OpenCodeGo,
     Runpod,
+    Cursor,
     Aws,
     Copilot,
     Antigravity,
@@ -24,6 +25,7 @@ impl ProviderKind {
             ProviderKind::OpenRouter => "openrouter",
             ProviderKind::OpenCodeGo => "opencode-go",
             ProviderKind::Runpod => "runpod",
+            ProviderKind::Cursor => "cursor",
             ProviderKind::Aws => "aws",
             ProviderKind::Copilot => "copilot",
             ProviderKind::Antigravity => "antigravity",
@@ -39,6 +41,7 @@ impl ProviderKind {
             ProviderKind::OpenRouter => "OpenRouter",
             ProviderKind::OpenCodeGo => "OpenCode Go",
             ProviderKind::Runpod => "Runpod",
+            ProviderKind::Cursor => "Cursor",
             ProviderKind::Aws => "AWS",
             ProviderKind::Copilot => "GitHub Copilot",
             ProviderKind::Antigravity => "Antigravity",

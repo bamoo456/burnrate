@@ -13,6 +13,8 @@ and keeps live meters for every account you add:
 - **Antigravity** — weekly and five-hour quota for both model pools (Gemini,
   Claude + GPT), read from the `agy` CLI's local quota server.
 - **OpenCode Go** — rolling, weekly, and monthly usage from your Zen API key.
+- **Cursor** — included-usage pool for the billing period, read through the
+  `cursor-agent` CLI.
 - **OpenRouter** — remaining prepaid credits.
 - **Runpod** — prepaid balance, current burn, runway, and active resources.
 - **AWS** — Cost Explorer month-to-date spend with optional budgets and
@@ -31,6 +33,8 @@ as native bundles for macOS, Linux, and Windows.
 - **Every account is added explicitly** — Burnrate never scans your
   filesystem to discover accounts. Claude Code and Codex sign in from the app
   via browser OAuth; OpenRouter, Runpod, and OpenCode Go take an API key;
+  Cursor reads usage through the `cursor-agent` CLI you are already signed in
+  to;
   Copilot takes a GitHub token; AWS uses your existing credential chain; and
   Antigravity reads quota from the `agy` CLI you are already signed in to.
 - Statuses roll up: the tray icon summarizes all accounts, flagging the one
