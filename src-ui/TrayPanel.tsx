@@ -64,6 +64,7 @@ const providerLabels: Record<ProviderKind, string> = {
   runpod: "Runpod",
   copilot: "Copilot",
   antigravity: "Antigravity",
+  cursor: "Cursor",
 };
 
 const statusLabels: Record<SnapshotStatus, string> = {

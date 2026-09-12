@@ -25,6 +25,9 @@ and use **Add account**:
 - **Antigravity** — no key to enter; sign in once with the `agy` CLI and
   Burnrate reads your quota from it. See the
   [Antigravity provider page](/providers/antigravity).
+- **Cursor** — no key to enter; sign in once with `cursor-agent login` and
+  Burnrate reads your included usage from it. See the
+  [Cursor provider page](/providers/cursor).
 - **AWS** — pick a credential profile (or leave blank for the default
   chain). See the [AWS provider page](/providers/aws).
 

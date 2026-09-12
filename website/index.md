@@ -5,7 +5,7 @@ hero:
   name: Burnrate
   text: Know your burn before it knows you.
   tagline: >-
-    A menu-bar monitor for Claude Code, Codex, Copilot, Antigravity,
+    A menu-bar monitor for Claude Code, Codex, Copilot, Antigravity, Cursor,
     OpenCode Go, OpenRouter, Runpod, and AWS — quotas, credits, spend, and
     subscription limits, all in one glance.
   image:
@@ -21,8 +21,9 @@ hero:
 
 features:
   - icon: 🔥
-    title: Eight providers, one glance
-    details: Claude Code, Codex, GitHub Copilot, Antigravity, OpenCode Go,
+    title: Nine providers, one glance
+    details:
+      Claude Code, Codex, GitHub Copilot, Antigravity, Cursor, OpenCode Go,
       OpenRouter, Runpod, and AWS Cost Explorer side by side — remaining
       quota, credits, spend, and reset timers.
   - icon: 👥
@@ -57,7 +58,7 @@ features:
 
 ## Watch the burn, not the dashboards
 
-No more tab-cycling through eight provider consoles. Burnrate keeps every
+No more tab-cycling through nine provider consoles. Burnrate keeps every
 account's meters in your menu bar and warns you before a window runs dry.
 
 <div class="br-meters">

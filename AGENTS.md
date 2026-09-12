@@ -6,7 +6,7 @@
 ## Overview
 
 Burnrate is a macOS-first menu-bar app that monitors remaining quota/credits
-across Claude Code, Codex, GitHub Copilot, Antigravity, OpenRouter, Runpod,
+across Claude Code, Codex, GitHub Copilot, Antigravity, Cursor, OpenRouter, Runpod,
 and AWS Cost Explorer spend (with multiple accounts per provider for Claude
 Code and Codex), plus claudex-powered **local usage insights** (per-provider daily
 cost, projections, model/project breakdowns from local CLI session logs).
@@ -201,6 +201,24 @@ burnrate`).
   missing token — or a billing-API failure — surfaces an error snapshot asking
   for one rather than silently degrading to a count derived from local session
   logs. Every message still states which source produced the number.
+- `providers/cursor.rs` — Cursor included-usage pool. Cursor publishes no
+  per-user quota API (`api.cursor.com` is team-admin only), so this POSTs the
+  IDE dashboard's Connect-RPC endpoint
+  (`api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage`,
+  `Connect-Protocol-Version: 1`, empty body) with the access token
+  `cursor-agent` keeps in the macOS Keychain (service `cursor-access-token`,
+  account `cursor-user`; `BURNRATE_CURSOR_TOKEN` overrides it, and is how the
+  wiremock test injects one). Read-only by design — the paired
+  `cursor-refresh-token` is the CLI's, and a second rotator would sign the
+  user's terminal out, the same invariant as the system-default `~/.claude`.
+  `planUsage` is in **cents**: a `limit > 0` yields a USD monthly bucket
+  (`used`, else `limit - remaining`), and a seat whose pool the server hides
+  degrades to `totalPercentUsed` against a 100% limit rather than erroring.
+  `billingCycleEnd` has shipped as both epoch millis and RFC 3339 — both are
+  accepted. Email is read (cosmetically) from `~/.cursor/cli-config.json`
+  `authInfo.email`; there is no `detect()` (this fork adds accounts
+  explicitly) and no claudex source, so Cursor never appears in local
+  insights. macOS-only.
 - `providers/antigravity.rs` — Google Antigravity quota. Antigravity ships no
   public quota API, so this drives the `agy` CLI's embedded Connect-RPC
   language server on an ephemeral **loopback** HTTPS port:

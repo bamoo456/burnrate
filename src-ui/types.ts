@@ -6,7 +6,8 @@ export type ProviderKind =
   | "runpod"
   | "aws"
   | "copilot"
-  | "antigravity";
+  | "antigravity"
+  | "cursor";
 export type CopilotPlan =
   | "free"
   | "pro"

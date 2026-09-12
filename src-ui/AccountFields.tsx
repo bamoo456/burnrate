@@ -32,6 +32,7 @@ export function AccountFields({
   const isCopilotProvider = form.provider === "copilot";
   const isOpenRouterProvider = form.provider === "openrouter";
   const isAntigravityProvider = form.provider === "antigravity";
+  const isCursorProvider = form.provider === "cursor";
 
   return (
     <>
@@ -53,6 +54,13 @@ export function AccountFields({
         <AwsFields form={form} setForm={setForm} />
       ) : isCopilotProvider ? (
         <CopilotFields form={form} setForm={setForm} isEdit={isEdit} />
+      ) : isCursorProvider ? (
+        <p className="form-help">
+          Cursor has no API key. Burnrate reads your included-usage pool with
+          the token the <code>cursor-agent</code> CLI stores in your Keychain,
+          so install it and run <code>cursor-agent login</code> once. Usage
+          covers the single Cursor account signed in to that CLI on this Mac.
+        </p>
       ) : isAntigravityProvider ? (
         <p className="form-help">
           Antigravity has no API key. Burnrate reads your quota through the{" "}
