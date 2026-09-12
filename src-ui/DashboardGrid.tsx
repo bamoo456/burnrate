@@ -68,15 +68,15 @@ export function DashboardGrid({
         <thead>
           <tr>
             <th scope="col">Account</th>
-            <th scope="col">Cost</th>
-            <th scope="col">Renews</th>
-            <th scope="col">Balance</th>
             {windows.map((window) => (
               <th scope="col" key={window.key}>
                 {window.label}
               </th>
             ))}
             <th scope="col">Next reset</th>
+            <th scope="col">Balance</th>
+            <th scope="col">Cost</th>
+            <th scope="col">Renews</th>
             <th scope="col">Status</th>
           </tr>
         </thead>
@@ -94,10 +94,11 @@ export function DashboardGrid({
           <tfoot>
             <tr>
               <td>Total subscriptions</td>
+              <td colSpan={windows.length + 2} />
               <td>
                 <strong>{formatMonthlyCostUsd(totalCost)}</strong>
               </td>
-              <td colSpan={windows.length + 3} />
+              <td colSpan={2} />
             </tr>
           </tfoot>
         ) : null}
@@ -121,13 +122,6 @@ function DashboardRow({
       <td className="dashboard-account-cell">
         <AccountIdentity snapshot={snapshot} />
       </td>
-      <td>
-        <CostMetric cost={cost} />
-      </td>
-      <td className="dashboard-renews-cell">{formatRenewal(renewsOn)}</td>
-      <td>
-        <BalanceMetric snapshot={snapshot} />
-      </td>
       {windows.map((window) => (
         <td key={window.key}>
           <UsageMetric bucket={dashboardWindowBucket(snapshot, window.key)} />
@@ -136,6 +130,13 @@ function DashboardRow({
       <td>
         <ResetMetric bucket={resetBucket} />
       </td>
+      <td>
+        <BalanceMetric snapshot={snapshot} />
+      </td>
+      <td>
+        <CostMetric cost={cost} />
+      </td>
+      <td className="dashboard-renews-cell">{formatRenewal(renewsOn)}</td>
       <td className="dashboard-status-cell">
         <StatusBadge status={snapshot.status} />
       </td>
