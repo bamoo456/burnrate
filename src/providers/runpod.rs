@@ -5,7 +5,10 @@ use chrono::{Duration as ChronoDuration, Utc};
 use reqwest::{Client, Url};
 use serde_json::json;
 
-use crate::models::{AccountConfig, SnapshotStatus, UsageBucketSnapshot, UsageSnapshot};
+use crate::{
+    burn_rate::format_runway,
+    models::{AccountConfig, SnapshotStatus, UsageBucketSnapshot, UsageSnapshot},
+};
 
 use super::{bool_value, endpoint, number, primary_quota, require_token, text, validate_endpoint};
 
@@ -516,19 +519,6 @@ fn format_usd(value: f64) -> String {
     } else {
         format!("${value:.2}")
     }
-}
-
-fn format_runway(seconds: f64) -> String {
-    if seconds < 60.0 {
-        return format!("{:.0}s", seconds.max(0.0));
-    }
-    if seconds < 60.0 * 60.0 {
-        return format!("{:.0}m", seconds / 60.0);
-    }
-    if seconds < 48.0 * 60.0 * 60.0 {
-        return format!("{:.1}h", seconds / 60.0 / 60.0);
-    }
-    format!("{:.0}d", seconds / 60.0 / 60.0 / 24.0)
 }
 
 fn plural(count: usize) -> &'static str {
