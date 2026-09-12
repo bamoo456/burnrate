@@ -75,6 +75,14 @@ burnrate`).
   the last good report and serializes collections (concurrent windows trigger
   one index sync); a disabled `local_insights` setting yields an explanatory
   unavailable report. All persistence flows through here.
+- `burn_rate.rs` — burn-rate estimation from locally sampled quota counters.
+  Provider APIs only expose point-in-time values, so the trailing rate comes
+  from differences between `usage_samples` rows persisted on each refresh:
+  monotonic monthly-credit counters (reset-aware) and credit balances
+  (top-up-aware). A 24-hour window is preferred, a 7-day window is the
+  fallback, and the estimate is appended to the snapshot message. Runpod's
+  API-provided spend rate does not use this path; its `format_runway` label is
+  shared from here.
 - `config.rs` — the **in-memory** `AppConfig` (settings + accounts) and path
   helpers; persistence lives in `storage.rs`. `views()` strips secrets and
   exposes only `hasSecret`, returning
@@ -93,7 +101,8 @@ burnrate`).
   import** of the legacy `accounts.json` (renamed `.migrated-<nonce>` after) —
   a schema-less/truncated DB file counts as fresh. `created_database()` is how
   `app_state.rs` knows to skip destructive startup reconciliation. Accounts,
-  AWS category buckets (own table, `ON DELETE CASCADE`), and settings all live
+  AWS category buckets (own table, `ON DELETE CASCADE`), settings, and the
+  timestamped `usage_samples` burn-rate history (pruned after 30 days) all live
   here; `plaintext_secret` is a column but is only populated in plaintext mode.
 - `key_store.rs` — secret storage: OS **keyring by default**, **plaintext only
   when explicitly selected**, with migration between modes and an in-process
@@ -176,6 +185,10 @@ burnrate`).
   stdio JSON (reset timestamps may be seconds or millis — both normalized), and
   reads the account email by decoding the `tokens.id_token` JWT in `auth.json`
   (`base64`, payload claims only — no signature check on local trusted data).
+  Credit-metered workspaces (no 5-hour/weekly windows and a null credit balance)
+  surface the workspace spend-control `individualLimit` as a **Monthly credits**
+  bucket (`used`/`limit`/`remainingPercent`/`resetsAt`) instead of rendering an
+  empty card.
   Each provider threads the account's per-account config dir
   (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`) into its CLI calls so multiple accounts
   stay isolated; openrouter hits `/api/v1/credits`. runpod combines the REST
