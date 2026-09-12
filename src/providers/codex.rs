@@ -26,6 +26,9 @@ use super::{
 
 const DEFAULT_ENDPOINT: &str = "https://chatgpt.com/backend-api/codex/rate_limits";
 const APP_SERVER_TIMEOUT: Duration = Duration::from_secs(20);
+/// Upstream Codex displays credit balances and spend-control limits as
+/// "credits", not dollars.
+const CREDITS_UNIT: &str = "credits";
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -51,6 +54,19 @@ struct CodexCreditsSnapshot {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct CodexSpendControlLimit {
+    #[serde(default, alias = "limit")]
+    limit: Option<String>,
+    #[serde(default, alias = "used")]
+    used: Option<String>,
+    #[serde(default, alias = "remaining_percent")]
+    remaining_percent: Option<i32>,
+    #[serde(default, alias = "resets_at")]
+    resets_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct CodexRateLimitSnapshot {
     #[serde(default, alias = "limit_id")]
     limit_id: Option<String>,
@@ -64,6 +80,8 @@ struct CodexRateLimitSnapshot {
     secondary: Option<CodexRateLimitWindow>,
     #[serde(default)]
     credits: Option<CodexCreditsSnapshot>,
+    #[serde(default, alias = "individual_limit")]
+    individual_limit: Option<CodexSpendControlLimit>,
     #[serde(default, alias = "rate_limit_reached_type")]
     rate_limit_reached_type: Option<String>,
 }
@@ -342,6 +360,15 @@ fn parse_codex_app_server_snapshots(
         {
             buckets.push(bucket);
         }
+        if let Some(individual_limit) = snapshot.individual_limit.as_ref()
+            && let Some(bucket) = bucket_from_individual_limit(
+                format!("{id_prefix}-credits-monthly"),
+                prefix.as_deref(),
+                individual_limit,
+            )
+        {
+            buckets.push(bucket);
+        }
     }
 
     let quota = primary_quota(&buckets);
@@ -414,6 +441,8 @@ fn app_server_snapshot_from_value(value: Value) -> Option<CodexRateLimitSnapshot
         && value.get("secondary").is_none()
         && value.get("planType").is_none()
         && value.get("plan_type").is_none()
+        && value.get("individualLimit").is_none()
+        && value.get("individual_limit").is_none()
     {
         return None;
     }
@@ -471,10 +500,7 @@ fn bucket_from_credits(credits: &CodexCreditsSnapshot) -> Option<UsageBucketSnap
     if !credits.has_credits || credits.unlimited {
         return None;
     }
-    let balance = credits
-        .balance
-        .as_deref()
-        .and_then(|balance| balance.parse::<f64>().ok())?;
+    let balance = parse_credit_amount(credits.balance.as_deref())?;
     Some(bucket_from_parts(
         "codex-credits",
         "Credits",
@@ -483,10 +509,49 @@ fn bucket_from_credits(credits: &CodexCreditsSnapshot) -> Option<UsageBucketSnap
             used: balance,
             limit: None,
             remaining: Some(balance),
-            unit: "$".to_string(),
+            unit: CREDITS_UNIT.to_string(),
             reset_at: None,
         },
     ))
+}
+
+/// Workspace spend controls report an effective monthly credit allowance.
+/// Upstream Codex surfaces it as "Monthly credit limit" with `used of limit
+/// credits`; this maps it to a resettable monthly bucket so burn rate and the
+/// Warning/Exhausted thresholds apply unchanged.
+fn bucket_from_individual_limit(
+    id: impl Into<String>,
+    prefix: Option<&str>,
+    limit: &CodexSpendControlLimit,
+) -> Option<UsageBucketSnapshot> {
+    let total = parse_credit_amount(limit.limit.as_deref())?;
+    if total <= 0.0 {
+        return None;
+    }
+    let used = parse_credit_amount(limit.used.as_deref()).or_else(|| {
+        limit
+            .remaining_percent
+            .map(|percent| total * f64::from(100 - percent.clamp(0, 100)) / 100.0)
+    })?;
+    Some(bucket_from_parts(
+        id,
+        prefix
+            .map(|prefix| format!("{prefix} Monthly credits"))
+            .unwrap_or_else(|| "Monthly credits".to_string()),
+        Some("Monthly".to_string()),
+        QuotaSnapshot {
+            used,
+            limit: Some(total),
+            remaining: Some((total - used).max(0.0)),
+            unit: CREDITS_UNIT.to_string(),
+            reset_at: limit.resets_at.and_then(timestamp_codex),
+        },
+    ))
+}
+
+fn parse_credit_amount(raw: Option<&str>) -> Option<f64> {
+    let value = raw?.trim().parse::<f64>().ok()?;
+    value.is_finite().then_some(value)
 }
 
 fn label_for_window(fallback: &str, duration_mins: Option<i64>) -> String {
@@ -800,6 +865,127 @@ mod tests {
         assert_eq!(snapshot.usage_buckets[0].label, "5-hour");
         assert_eq!(snapshot.usage_buckets[1].label, "Weekly");
         assert_eq!(snapshot.usage_buckets[2].label, "Credits");
+        assert_eq!(snapshot.usage_buckets[2].unit, "credits");
+    }
+
+    #[test]
+    fn maps_codex_app_server_individual_monthly_credits() {
+        // Business workspace accounts report no windows and a null credits
+        // balance; the effective monthly allowance lives in individualLimit.
+        // Mirrors the real response: the same snapshot in both views.
+        let business = json!({
+            "limitId": "codex",
+            "planType": "business",
+            "primary": null,
+            "secondary": null,
+            "credits": {
+                "hasCredits": true,
+                "unlimited": false,
+                "balance": null
+            },
+            "individualLimit": {
+                "limit": "37500",
+                "used": "955.5675292015076",
+                "remainingPercent": 97,
+                "resetsAt": 1790812801_i64
+            }
+        });
+        let snapshot = parse_codex_rate_limits(
+            &account(),
+            &json!({
+                "id": 2,
+                "result": {
+                    "rateLimits": business.clone(),
+                    "rateLimitsByLimitId": { "codex": business }
+                }
+            }),
+        );
+
+        assert_eq!(snapshot.usage_buckets.len(), 1);
+        let bucket = &snapshot.usage_buckets[0];
+        assert_eq!(bucket.id, "codex-credits-monthly");
+        assert_eq!(bucket.label, "Monthly credits");
+        assert_eq!(bucket.window.as_deref(), Some("Monthly"));
+        assert_eq!(bucket.unit, "credits");
+        assert_eq!(bucket.limit, Some(37_500.0));
+        assert!((bucket.used - 955.567_529_201_507_6).abs() < 1e-9);
+        assert!((bucket.remaining.unwrap() - 36_544.432_470_798_49).abs() < 1e-6);
+        assert_eq!(bucket.reset_at.unwrap().timestamp(), 1_790_812_801);
+        assert_eq!(bucket.status, SnapshotStatus::Healthy);
+    }
+
+    #[test]
+    fn keeps_individual_limit_snapshot_without_plan_or_windows() {
+        let snapshot = parse_codex_rate_limits(
+            &account(),
+            &json!({
+                "id": 2,
+                "result": {
+                    "rateLimits": {
+                        "individualLimit": {
+                            "limit": "100",
+                            "used": "80",
+                            "remainingPercent": 20,
+                            "resetsAt": 1790812801_i64
+                        }
+                    }
+                }
+            }),
+        );
+
+        assert_eq!(snapshot.usage_buckets.len(), 1);
+        assert_eq!(snapshot.usage_buckets[0].id, "codex-credits-monthly");
+        assert_eq!(snapshot.usage_buckets[0].status, SnapshotStatus::Warning);
+        assert_eq!(snapshot.status, SnapshotStatus::Warning);
+        assert_eq!(snapshot.quota.unwrap().remaining, Some(20.0));
+    }
+
+    #[test]
+    fn individual_limit_falls_back_to_remaining_percent() {
+        let bucket = bucket_from_individual_limit(
+            "codex-credits-monthly",
+            None,
+            &CodexSpendControlLimit {
+                limit: Some("1000".to_string()),
+                used: Some("garbage".to_string()),
+                remaining_percent: Some(25),
+                resets_at: None,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(bucket.used, 750.0);
+        assert_eq!(bucket.remaining, Some(250.0));
+    }
+
+    #[test]
+    fn individual_limit_requires_a_positive_limit() {
+        assert!(
+            bucket_from_individual_limit(
+                "codex-credits-monthly",
+                None,
+                &CodexSpendControlLimit {
+                    limit: Some("0".to_string()),
+                    used: Some("1".to_string()),
+                    remaining_percent: Some(100),
+                    resets_at: None,
+                },
+            )
+            .is_none()
+        );
+        assert!(
+            bucket_from_individual_limit(
+                "codex-credits-monthly",
+                None,
+                &CodexSpendControlLimit {
+                    limit: None,
+                    used: Some("1".to_string()),
+                    remaining_percent: Some(100),
+                    resets_at: None,
+                },
+            )
+            .is_none()
+        );
     }
 
     #[test]
