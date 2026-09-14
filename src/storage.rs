@@ -17,12 +17,23 @@ use crate::{
     models::{AccountConfig, AppSettings, AwsCategoryConfig, AwsCostFilter, AwsGroupBy},
 };
 
-const LATEST_SCHEMA_VERSION: i64 = 5;
+const LATEST_SCHEMA_VERSION: i64 = 6;
 
 pub(crate) struct ConfigStore {
     conn: Mutex<Connection>,
     db_path: PathBuf,
     created_database: bool,
+}
+
+/// One observed quota counter value, persisted so a burn rate can be derived
+/// from differences over time. Provider APIs only expose point-in-time values
+/// (a credits balance or a period-to-date used amount), never a spend rate.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct UsageSample {
+    pub account_id: String,
+    pub bucket_id: String,
+    pub value: f64,
+    pub observed_at: i64,
 }
 
 impl ConfigStore {
@@ -98,6 +109,64 @@ impl ConfigStore {
         tx.commit()?;
         harden_database_files(&self.db_path)?;
         Ok(())
+    }
+
+    /// Upsert observed quota samples and drop history older than `retain_since`.
+    /// Re-recording the same fetch is a no-op: callers stamp samples with the
+    /// snapshot's `fetched_at`, and one fetch always yields one row per bucket.
+    pub(crate) fn record_usage_samples(
+        &self,
+        samples: &[UsageSample],
+        retain_since: i64,
+    ) -> Result<()> {
+        let mut conn = self.conn.lock().expect("config store lock");
+        let tx = conn.transaction()?;
+        if !samples.is_empty() {
+            let mut insert = tx.prepare(
+                "INSERT OR REPLACE INTO usage_samples (account_id, bucket_id, value, observed_at)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for sample in samples {
+                insert.execute(params![
+                    sample.account_id,
+                    sample.bucket_id,
+                    sample.value,
+                    sample.observed_at
+                ])?;
+            }
+        }
+        tx.execute(
+            "DELETE FROM usage_samples WHERE observed_at < ?1",
+            params![retain_since],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Samples for one account bucket at or after `since`, oldest first — the
+    /// ordering the burn-rate estimator expects.
+    pub(crate) fn usage_samples_since(
+        &self,
+        account_id: &str,
+        bucket_id: &str,
+        since: i64,
+    ) -> Result<Vec<UsageSample>> {
+        let conn = self.conn.lock().expect("config store lock");
+        let mut stmt = conn.prepare(
+            "SELECT value, observed_at FROM usage_samples
+             WHERE account_id = ?1 AND bucket_id = ?2 AND observed_at >= ?3
+             ORDER BY observed_at ASC",
+        )?;
+        let rows = stmt.query_map(params![account_id, bucket_id, since], |row| {
+            Ok(UsageSample {
+                account_id: account_id.to_string(),
+                bucket_id: bucket_id.to_string(),
+                value: row.get(0)?,
+                observed_at: row.get(1)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 }
 
@@ -262,6 +331,24 @@ fn run_migrations(conn: &mut Connection) -> Result<()> {
             ALTER TABLE accounts ADD COLUMN subscription_renews_on TEXT;
 
             PRAGMA user_version = 5;
+            "#,
+        )?;
+        tx.commit()?;
+    }
+    if version < 6 {
+        let tx = conn.transaction()?;
+        tx.execute_batch(
+            r#"
+            CREATE TABLE usage_samples (
+                account_id TEXT NOT NULL,
+                bucket_id TEXT NOT NULL,
+                value REAL NOT NULL,
+                observed_at INTEGER NOT NULL,
+                PRIMARY KEY (account_id, bucket_id, observed_at)
+            );
+            CREATE INDEX idx_usage_samples_observed_at ON usage_samples (observed_at);
+
+            PRAGMA user_version = 6;
             "#,
         )?;
         tx.commit()?;
@@ -667,6 +754,14 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, LATEST_SCHEMA_VERSION);
+        let usage_samples_table: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'usage_samples'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(usage_samples_table, 1);
     }
 
     #[test]
@@ -1209,6 +1304,100 @@ mod tests {
         store.save_config(&second).unwrap();
 
         assert!(store.load_config().unwrap().accounts.is_empty());
+    }
+
+    #[test]
+    fn records_queries_and_prunes_usage_samples() {
+        let dir = tempdir().unwrap();
+        let store = ConfigStore::open_at(
+            dir.path().join(config::DATABASE_FILE),
+            dir.path().join(config::CONFIG_FILE),
+        )
+        .unwrap();
+        let samples = vec![
+            UsageSample {
+                account_id: "codex-1".to_string(),
+                bucket_id: "codex-credits-monthly".to_string(),
+                value: 10.0,
+                observed_at: 1_000,
+            },
+            UsageSample {
+                account_id: "codex-1".to_string(),
+                bucket_id: "codex-credits-monthly".to_string(),
+                value: 12.5,
+                observed_at: 1_600,
+            },
+            UsageSample {
+                account_id: "codex-2".to_string(),
+                bucket_id: "codex-credits-monthly".to_string(),
+                value: 99.0,
+                observed_at: 1_600,
+            },
+            UsageSample {
+                account_id: "codex-1".to_string(),
+                bucket_id: "codex-credits".to_string(),
+                value: 3.0,
+                observed_at: 1_600,
+            },
+        ];
+        store.record_usage_samples(&samples, 1_200).unwrap();
+
+        // Older-than-retention rows are pruned, and reads are scoped to one
+        // account + bucket in ascending time order.
+        let listed = store
+            .usage_samples_since("codex-1", "codex-credits-monthly", 0)
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].value, 12.5);
+        assert_eq!(listed[0].observed_at, 1_600);
+        assert_eq!(
+            store
+                .usage_samples_since("codex-1", "codex-credits", 0)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            store
+                .usage_samples_since("codex-1", "codex-credits-monthly", 1_600)
+                .unwrap()
+                .len()
+                == 1
+        );
+    }
+
+    #[test]
+    fn re_recording_the_same_fetch_replaces_instead_of_duplicating() {
+        let dir = tempdir().unwrap();
+        let store = ConfigStore::open_at(
+            dir.path().join(config::DATABASE_FILE),
+            dir.path().join(config::CONFIG_FILE),
+        )
+        .unwrap();
+        let sample = UsageSample {
+            account_id: "codex-1".to_string(),
+            bucket_id: "codex-credits-monthly".to_string(),
+            value: 10.0,
+            observed_at: 1_600,
+        };
+        store
+            .record_usage_samples(std::slice::from_ref(&sample), 0)
+            .unwrap();
+        store
+            .record_usage_samples(
+                &[UsageSample {
+                    value: 11.0,
+                    ..sample
+                }],
+                0,
+            )
+            .unwrap();
+
+        let listed = store
+            .usage_samples_since("codex-1", "codex-credits-monthly", 0)
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].value, 11.0);
     }
 
     #[test]

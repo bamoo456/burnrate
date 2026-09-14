@@ -4,6 +4,13 @@ Burnrate reads Codex **Pro/Max plan** info and **rate-limit buckets**
 (5-hour and weekly windows, including Spark buckets where present) directly
 from the Codex app server over stdio — the same data the Codex UI shows.
 
+Business/usage-based workspaces that meter **credits** instead of time windows
+show a **Monthly credits** allowance (used / limit and reset from the
+workspace spend controls). Once Burnrate has collected samples over time it
+also estimates a **burn rate** and runway from observed credit consumption.
+The Codex API only reports point-in-time values, so a fresh install shows no
+estimate for the first hours.
+
 ## Requirements
 
 - The `codex` CLI installed and signed in.

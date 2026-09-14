@@ -144,3 +144,24 @@ test("Antigravity's Gemini pair wins the dashboard columns over Claude + GPT", (
     "3p-weekly",
   ]);
 });
+
+test("Codex monthly credits take the monthly column", () => {
+  const value = snapshot("codex", [
+    {
+      id: "codex-credits-monthly",
+      label: "Monthly credits",
+      window: "Monthly",
+      used: 955.57,
+      limit: 37_500,
+      remaining: 36_544.43,
+      unit: "credits",
+      resetAt: new Date(Date.now() + 86_400_000).toISOString(),
+      status: "healthy",
+    },
+  ]);
+
+  expect(dashboardWindowBucket(value, "monthly")?.id).toBe(
+    "codex-credits-monthly",
+  );
+  expect(secondaryUsageBuckets(value)).toEqual([]);
+});

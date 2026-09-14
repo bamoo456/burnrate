@@ -5,6 +5,28 @@ import type { AccountView, UsageSnapshot } from "./types";
 
 afterEach(() => cleanup());
 
+test("keeps remaining usage ahead of account metadata", () => {
+  render(
+    <DashboardGrid
+      snapshots={[snapshot({ provider: "codex", label: "Codex Pro" })]}
+    />,
+  );
+
+  expect(
+    screen.getAllByRole("columnheader").map((header) => header.textContent),
+  ).toEqual([
+    "Account",
+    "5-hour",
+    "Weekly",
+    "Monthly",
+    "Next reset",
+    "Balance",
+    "Cost",
+    "Renews",
+    "Status",
+  ]);
+});
+
 function snapshot(
   overrides: Partial<UsageSnapshot> & Pick<UsageSnapshot, "provider" | "label">,
 ): UsageSnapshot {

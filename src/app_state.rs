@@ -7,10 +7,11 @@ use std::{
 };
 
 use anyhow::{Result, anyhow};
-use chrono::Utc;
+use chrono::{TimeZone, Utc};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::{
+    burn_rate,
     config::{self, AppConfig},
     insights, key_store,
     models::AppSettings,
@@ -22,7 +23,7 @@ use crate::{
         self, ProviderClient,
         login::{self, LoginManager, LoginOutcome},
     },
-    storage::ConfigStore,
+    storage::{ConfigStore, UsageSample},
     tray,
 };
 
@@ -31,6 +32,11 @@ use crate::{
 /// use a fresh provider client and therefore bypass the providers' legacy 5m
 /// cache for account-managed, non-AWS providers.
 const LIVE_REFRESH_BURST_WINDOW: Duration = Duration::from_secs(2);
+
+/// Usage-sample history kept for burn-rate estimation. The estimator itself
+/// only consults the trailing week; the rest is retained for future windows.
+const USAGE_SAMPLE_RETENTION_SECONDS: i64 = 30 * 24 * 60 * 60;
+const BURN_RATE_LOOKBACK_SECONDS: i64 = 7 * 24 * 60 * 60;
 
 pub(crate) struct AppState {
     config_store: ConfigStore,
@@ -280,6 +286,7 @@ impl AppState {
                 .collect()
         };
         self.persist_discovered_emails(&snapshots);
+        let snapshots = self.attach_burn_rates(snapshots);
         *live_snapshots = Some((Instant::now(), signature, snapshots.clone()));
         snapshots
     }
@@ -305,6 +312,79 @@ impl AppState {
             }
             Ok(changed)
         });
+    }
+
+    /// Persist one usage counter sample per credit-like bucket (timestamped to
+    /// the fetch, so re-reading a cached snapshot cannot duplicate history) and
+    /// append the estimated burn rate to the snapshot message. History is a
+    /// best-effort enrichment: a sampling failure must never fail a refresh.
+    fn attach_burn_rates(&self, snapshots: Vec<UsageSnapshot>) -> Vec<UsageSnapshot> {
+        let now = Utc::now();
+        let mut samples = Vec::new();
+        for snapshot in &snapshots {
+            for bucket in &snapshot.usage_buckets {
+                let Some(value) = burn_rate::sample_value(snapshot.provider, bucket) else {
+                    continue;
+                };
+                samples.push(UsageSample {
+                    account_id: snapshot.account_id.clone(),
+                    bucket_id: bucket.id.clone(),
+                    value,
+                    observed_at: snapshot.fetched_at.timestamp(),
+                });
+            }
+        }
+        if let Err(error) = self
+            .config_store
+            .record_usage_samples(&samples, now.timestamp() - USAGE_SAMPLE_RETENTION_SECONDS)
+        {
+            eprintln!("burnrate: failed to persist usage samples: {error:#}");
+        }
+
+        snapshots
+            .into_iter()
+            .map(|mut snapshot| {
+                if let Some(note) = self.burn_note_for(&snapshot, now) {
+                    snapshot.message = Some(match snapshot.message.take() {
+                        Some(existing) => format!("{existing} · {note}"),
+                        None => note,
+                    });
+                }
+                snapshot
+            })
+            .collect()
+    }
+
+    fn burn_note_for(
+        &self,
+        snapshot: &UsageSnapshot,
+        now: chrono::DateTime<Utc>,
+    ) -> Option<String> {
+        let since = now.timestamp() - BURN_RATE_LOOKBACK_SECONDS;
+        for bucket in &snapshot.usage_buckets {
+            let Some(kind) = burn_rate::sample_kind(snapshot.provider, bucket) else {
+                continue;
+            };
+            let Ok(samples) =
+                self.config_store
+                    .usage_samples_since(&snapshot.account_id, &bucket.id, since)
+            else {
+                continue;
+            };
+            let points: Vec<burn_rate::SamplePoint> = samples
+                .into_iter()
+                .filter_map(|sample| {
+                    Some(burn_rate::SamplePoint {
+                        value: sample.value,
+                        observed_at: Utc.timestamp_opt(sample.observed_at, 0).single()?,
+                    })
+                })
+                .collect();
+            if let Some(note) = burn_rate::burn_note(kind, bucket, &points) {
+                return Some(note);
+            }
+        }
+        None
     }
 
     pub(crate) async fn dashboard(&self) -> Result<DashboardState> {
@@ -929,7 +1009,9 @@ mod tests {
         );
     }
 
-    use crate::models::{QuotaSnapshot, SubscriptionPlan, SubscriptionSnapshot};
+    use crate::models::{
+        QuotaSnapshot, SubscriptionPlan, SubscriptionSnapshot, UsageBucketSnapshot,
+    };
 
     fn snapshot(status: SnapshotStatus, message: Option<&str>) -> UsageSnapshot {
         UsageSnapshot {
@@ -1000,5 +1082,87 @@ mod tests {
             last_good.get("account-1").unwrap().status,
             SnapshotStatus::Warning
         );
+    }
+
+    fn sandbox_state(dir: &tempfile::TempDir) -> AppState {
+        AppState {
+            config_store: ConfigStore::open_at(
+                dir.path().join(config::DATABASE_FILE),
+                dir.path().join(config::CONFIG_FILE),
+            )
+            .unwrap(),
+            config: Mutex::new(AppConfig::default()),
+            provider_client: ProviderClient::new(),
+            login_manager: LoginManager::new(),
+            last_good_snapshots: Mutex::new(HashMap::new()),
+            live_snapshots: tokio::sync::Mutex::new(None),
+            local_usage: tokio::sync::Mutex::new(None),
+        }
+    }
+
+    fn codex_monthly_snapshot(
+        fetched_at: chrono::DateTime<Utc>,
+        used: f64,
+        remaining: f64,
+    ) -> UsageSnapshot {
+        let mut snapshot = snapshot(SnapshotStatus::Healthy, None);
+        snapshot.account_id = "codex-1".to_string();
+        snapshot.provider = ProviderKind::Codex;
+        snapshot.quota = None;
+        snapshot.fetched_at = fetched_at;
+        snapshot.usage_buckets = vec![UsageBucketSnapshot {
+            id: "codex-credits-monthly".to_string(),
+            label: "Monthly credits".to_string(),
+            window: Some("Monthly".to_string()),
+            used,
+            limit: Some(used + remaining),
+            remaining: Some(remaining),
+            unit: "credits".to_string(),
+            reset_at: None,
+            status: SnapshotStatus::Healthy,
+        }];
+        snapshot
+    }
+
+    #[test]
+    fn attach_burn_rates_persists_samples_and_appends_the_estimate() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = sandbox_state(&dir);
+        let now = Utc::now();
+        state
+            .config_store
+            .record_usage_samples(
+                &[
+                    UsageSample {
+                        account_id: "codex-1".to_string(),
+                        bucket_id: "codex-credits-monthly".to_string(),
+                        value: 100.0,
+                        observed_at: (now - chrono::Duration::minutes(120)).timestamp(),
+                    },
+                    UsageSample {
+                        account_id: "codex-1".to_string(),
+                        bucket_id: "codex-credits-monthly".to_string(),
+                        value: 160.0,
+                        observed_at: (now - chrono::Duration::minutes(60)).timestamp(),
+                    },
+                ],
+                0,
+            )
+            .unwrap();
+
+        let annotated = state.attach_burn_rates(vec![codex_monthly_snapshot(now, 220.0, 780.0)]);
+
+        assert_eq!(annotated.len(), 1);
+        assert_eq!(
+            annotated[0].message.as_deref(),
+            Some("burn ~60 credits/hr · runway 13.0h")
+        );
+        // This fetch was recorded too, so the next refresh can build on it.
+        let stored = state
+            .config_store
+            .usage_samples_since("codex-1", "codex-credits-monthly", 0)
+            .unwrap();
+        assert_eq!(stored.len(), 3);
+        assert_eq!(stored[2].value, 220.0);
     }
 }
